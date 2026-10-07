@@ -1,0 +1,22 @@
+race:
+  target_date: 2026-12-31     # change to a real race date if you pick one
+  goal_time: "1:59:59"        # stretch
+  acceptable_time: "2:29:59"
+  last_result: "3:39"
+
+primary_goal: "Visible abs by end of 2026"   # mandatory; the race is best-effort
+
+current:
+  continuous_run_min: 20      # update
+  longest_session_km: 11.6    # update
+
+schedule:
+  preferred_time: morning
+  days_available: 7
+  max_hard_days_per_week: 2   # HIIT or tempo
+  rest_days_per_week: 1
+
+rules:
+  - "Low readiness (<70): walk or rest only"
+  - "Never two hard days back to back"
+  - "Long run on weekends"
