@@ -15,6 +15,7 @@ schedule:
   days_available: 7
   max_hard_days_per_week: 2   # HIIT or tempo
   rest_days_per_week: 1
+  readiness_floor: 70         # below this: walk or rest only (enforced in code)
 
 rules:
   - "Low readiness (<70): walk or rest only"
