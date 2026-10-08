@@ -52,6 +52,29 @@ def free_slots(busy: list[tuple[datetime, datetime]], window_start: datetime, wi
     return slots
 
 
+def plan_window(busy: list[tuple[datetime, datetime]], now: datetime, day_start: datetime,
+                day_end: datetime, min_minutes: int = MIN_SLOT_MINUTES) -> tuple[datetime, datetime] | None:
+    """The time available for a workout starting now.
+
+    Starts now, or when the current event ends (chained through back-to-back events).
+    Ends at the next event or at day_end. A gap shorter than `min_minutes` is skipped
+    in favour of the next free gap. None if nothing is left today.
+    """
+    cursor = max(now, day_start)
+    for start, end in sorted(busy):
+        if end <= cursor:
+            continue
+        if start <= cursor:                     # in this event now: wait until it ends
+            cursor = end
+            continue
+        if start - cursor >= timedelta(minutes=min_minutes):
+            return cursor, start
+        cursor = end                            # gap too short: look after this event
+    if day_end - cursor >= timedelta(minutes=min_minutes):
+        return cursor, day_end
+    return None
+
+
 def schedule_for(cal: icalendar.Calendar, day: date) -> dict:
     """Busy blocks, all-day events, and free slots for `day`."""
     window_start = datetime.combine(day, time(DAY_START_HOUR), TZ)

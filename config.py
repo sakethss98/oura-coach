@@ -33,3 +33,19 @@ def env(name: str) -> str:
     if not value:
         raise RuntimeError(f"Missing {name} in .env")
     return value
+
+
+# Every value that must never appear in logs or chat replies.
+SECRET_ENV_VARS = [
+    "OPENAI_API_KEY", "OURA_CLIENT_ID", "OURA_CLIENT_SECRET", "OURA_ACCESS_TOKEN",
+    "OURA_REFRESH_TOKEN", "TELEGRAM_BOT_TOKEN", "GCAL_ICAL_URL",
+]
+
+
+def redact(text: str) -> str:
+    """Replace any secret value from the environment with [redacted]."""
+    for name in SECRET_ENV_VARS:
+        value = os.getenv(name)
+        if value and len(value) >= 6:
+            text = text.replace(value, "[redacted]")
+    return text

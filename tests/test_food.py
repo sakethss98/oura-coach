@@ -1,4 +1,4 @@
-from baseline import compute_baseline, food_totals
+from baseline import food_totals
 from policy import policy_check
 from tests.test_policy import ctx, plan
 
@@ -23,14 +23,13 @@ def test_daily_food_sum():
 
 
 def test_no_food_logged_gives_zero_entries():
-    assert food_totals([])["entries"] == 0
-    baseline = compute_baseline({}, [], [], "morning", 70, food_today=[], food_yesterday=[])
-    assert baseline["food"] == {"yesterday": food_totals([]), "today": food_totals([])}
+    assert food_totals([]) == {"entries": 0, "protein_g": 0, "fiber_g": 0, "carbs_g": 0,
+                               "calories": 0, "caffeine_mg": 0, "alcohol_drinks": 0}
 
 
 def test_no_food_day_plans_normally():
     # Food is left out of the decision: a hard plan on a good day is not capped.
     proposed = plan("HIIT", 5, "06:00-06:40", 40)
-    final, overrides = policy_check(proposed, ctx(readiness=88))
+    final, overrides = policy_check(proposed, ctx(readiness=88, recent_food=[]))
     assert final == proposed
     assert overrides == []

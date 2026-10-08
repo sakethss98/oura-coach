@@ -1,4 +1,4 @@
-"""Deterministic comparisons: today vs the 7-day baseline, slot choice, food sums.
+"""Deterministic comparisons: today vs the 7-day baseline, readiness band, food sums.
 
 Pure functions only (no I/O), so they are easy to unit test.
 """
@@ -15,7 +15,6 @@ THRESHOLDS = {
 # The status that means "worse than usual" for each metric. Lower resting HR is better.
 WORSE_STATUS = {"readiness_score": "below", "sleep_score": "below", "hrv_ms": "below", "resting_hr": "above"}
 
-MORNING_ENDS = "12:00"
 FOOD_SUM_FIELDS = {
     "protein_g": "est_protein_g",
     "fiber_g": "est_fiber_g",
@@ -75,20 +74,6 @@ def readiness_band(comparison: dict, readiness_floor: int) -> dict:
     return {"band": "maintain", "reason": "mixed: readiness or HRV missing"}
 
 
-def pick_slot(free_slots: list[list[str]], preferred_time: str = "morning") -> list[str] | None:
-    """Earliest morning slot if mornings are preferred, else the earliest slot of the day.
-
-    Slots are ["HH:MM", "HH:MM"] pairs in local time, already sorted.
-    """
-    if not free_slots:
-        return None
-    if preferred_time == "morning":
-        morning = [s for s in free_slots if s[0] < MORNING_ENDS]
-        if morning:
-            return morning[0]
-    return free_slots[0]
-
-
 def food_totals(entries: list[dict]) -> dict:
     """Sum the estimated nutrition of a list of food_log rows."""
     totals = {"entries": len(entries)}
@@ -97,12 +82,6 @@ def food_totals(entries: list[dict]) -> dict:
     return totals
 
 
-def compute_baseline(today: dict, history: list[dict], free_slots: list[list[str]], preferred_time: str,
-                     readiness_floor: int, food_today: list[dict], food_yesterday: list[dict]) -> dict:
+def compute_baseline(today: dict, history: list[dict], readiness_floor: int) -> dict:
     comparison = compare(today, history)
-    return {
-        "comparison": comparison,
-        "band": readiness_band(comparison, readiness_floor),
-        "recommended_slot": pick_slot(free_slots, preferred_time),
-        "food": {"yesterday": food_totals(food_yesterday), "today": food_totals(food_today)},
-    }
+    return {"comparison": comparison, "band": readiness_band(comparison, readiness_floor)}

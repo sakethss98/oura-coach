@@ -64,7 +64,6 @@ def main() -> None:
     print(f"Fetching Oura data {start} .. {today}")
     client = OuraClient()
     raw = client.fetch_range(start, end)
-    raw["personal_info"] = client.personal_info()
     for name, payload in raw.items():
         save_fixture(name, payload)
     print(f"Saved {len(raw)} raw responses to {FIXTURES_DIR.name}/\n")

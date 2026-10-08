@@ -106,15 +106,16 @@ class OuraClient:
         return self._get("personal_info")
 
     def fetch_range(self, start: date, end: date) -> dict:
-        """All raw collections for [start, end), keyed by endpoint name."""
+        """All raw collections for [start, end), keyed by endpoint name, plus personal_info."""
         raw = {name: self.daily(name, start, end) for name in DAILY_ENDPOINTS}
         raw["heartrate"] = self.heartrate(start, end)
+        raw["personal_info"] = self.personal_info()
         return raw
 
 
 def load_fixtures() -> dict:
-    """Raw collections saved by scripts/smoke_test.py, same shape as `fetch_range`."""
-    names = [*DAILY_ENDPOINTS, "heartrate"]
+    """Raw responses saved by scripts/smoke_test.py, same shape as `fetch_range`."""
+    names = [*DAILY_ENDPOINTS, "heartrate", "personal_info"]
     return {name: json.loads((FIXTURES_DIR / f"{name}.json").read_text()) for name in names}
 
 
@@ -124,6 +125,21 @@ def latest_day(raw: dict) -> date:
 
 
 # --- parsing (fields taken from real responses saved in fixtures/) -----------
+
+def body_metrics(raw: dict) -> dict:
+    """Age, weight and height from personal_info (fields seen in fixtures/personal_info.json).
+
+    Oura gives weight in kg and height in meters (judged from the values; the response has no units).
+    """
+    info = raw.get("personal_info") or {}
+    height_m = info.get("height")
+    return {
+        "age": info.get("age"),
+        "weight_kg": info.get("weight"),
+        "height_cm": round(height_m * 100, 1) if height_m is not None else None,
+        "sex": info.get("biological_sex"),
+    }
+
 
 def _by_day(records: list[dict]) -> dict[str, dict]:
     return {r["day"]: r for r in records}
@@ -158,6 +174,9 @@ def daily_metrics(raw: dict, day: date) -> dict:
     def minutes(seconds):
         return round(seconds / 60) if seconds is not None else None
 
+    def local(iso: str) -> datetime:
+        return datetime.fromisoformat(iso).astimezone(TZ)
+
     return {
         "day": key,
         "readiness_score": readiness.get("score"),
@@ -172,16 +191,17 @@ def daily_metrics(raw: dict, day: date) -> dict:
         "activity_score": activity.get("score"),
         "steps": activity.get("steps"),
         "active_calories": activity.get("active_calories"),
+        "high_activity_min": minutes(activity.get("high_activity_time")),
+        "medium_activity_min": minutes(activity.get("medium_activity_time")),
         "hr_avg": round(sum(everyday_bpms) / len(everyday_bpms)) if everyday_bpms else None,
         "hr_max": max(bpms) if bpms else None,
         "workouts": [
             {
                 "activity": w["activity"],
                 "intensity": w["intensity"],
-                "minutes": round(
-                    (datetime.fromisoformat(w["end_datetime"]) - datetime.fromisoformat(w["start_datetime"]))
-                    .total_seconds() / 60
-                ),
+                "start": local(w["start_datetime"]).isoformat(timespec="minutes"),
+                "end": local(w["end_datetime"]).isoformat(timespec="minutes"),
+                "minutes": round((local(w["end_datetime"]) - local(w["start_datetime"])).total_seconds() / 60),
             }
             for w in raw["workout"]["data"] if w["day"] == key
         ],

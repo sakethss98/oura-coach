@@ -1,0 +1,26 @@
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	fetch_data(fetch_data)
+	compute_baseline(compute_baseline)
+	checkin(checkin)
+	gather_today(gather_today)
+	plan(plan)
+	policy_check(policy_check)
+	log(log)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> fetch_data;
+	checkin --> gather_today;
+	compute_baseline --> checkin;
+	fetch_data --> compute_baseline;
+	gather_today --> plan;
+	plan --> policy_check;
+	policy_check --> log;
+	log --> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc

@@ -21,3 +21,25 @@ rules:
   - "Low readiness (<70): walk or rest only"
   - "Never two hard days back to back"
   - "Long run on weekends"
+
+nutrition:                    # targets computed in code from Oura personal_info (age, weight, height, sex)
+  diet: vegetarian
+  cuisine: "Indian preferred"
+  weight_kg: null             # optional override if Oura's weight is stale
+  activity_factor: 1.55       # x BMR (Mifflin-St Jeor); fixed, not from active calories
+  deficit_kcal: 400           # body-composition goal: visible abs
+  protein_g_per_kg: 1.8
+  fat_pct: 25                 # % of calories; carbs = the rest
+  fiber_g_per_1000kcal: 14
+
+recent_food_caps:             # enforced in code; strictest match wins
+  - {within_min: 60,  min_calories: 400, max_intensity: 2}   # real meal in the last hour
+  - {within_min: 120, min_calories: 400, max_intensity: 3}   # real meal in the last 2 h
+  - {within_min: 30,  min_calories: 150, max_intensity: 3}   # snack in the last 30 min
+
+activity:
+  hard_oura:                  # Oura workouts that count as a hard day
+    running: {min_minutes: 60}
+  walk_counts:                # walk of 20+ min = light workout, never hard
+    min_minutes: 20
+    not_on_bands: [PUSH]      # on PUSH days walks don't count toward "worked out today"

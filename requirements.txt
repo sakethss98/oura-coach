@@ -10,3 +10,4 @@ python-dotenv>=1.0
 pyyaml>=6.0
 tzdata>=2024.1
 pytest>=8.0
+langgraph-cli[inmem]>=0.3   # for `langgraph dev` (Studio)

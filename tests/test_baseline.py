@@ -1,4 +1,4 @@
-from baseline import compare, metric_status, pick_slot, readiness_band
+from baseline import compare, compute_baseline, metric_status, readiness_band
 
 
 def day(readiness=None, hrv=None, rhr=None, sleep=None):
@@ -40,18 +40,10 @@ def test_missing_today_or_history():
     assert compare(day(sleep=80), [day()])["sleep_score"]["status"] == "missing"
 
 
-def test_pick_slot_prefers_morning():
-    slots = [["06:00", "06:45"], ["13:00", "15:00"]]
-    assert pick_slot(slots, "morning") == ["06:00", "06:45"]
-
-
-def test_pick_slot_falls_back_when_no_morning_slot():
-    slots = [["13:00", "15:00"], ["18:00", "21:00"]]
-    assert pick_slot(slots, "morning") == ["13:00", "15:00"]
-
-
-def test_pick_slot_none_when_fully_booked():
-    assert pick_slot([], "morning") is None
+def test_compute_baseline_returns_comparison_and_band():
+    result = compute_baseline(day(readiness=80, hrv=50, rhr=55, sleep=80), [day(80, 50, 55, 80)] * 7, 70)
+    assert set(result) == {"comparison", "band"}
+    assert result["band"]["band"] == "push"
 
 
 def statuses(readiness="normal", hrv="normal", rhr="normal", sleep="normal", readiness_value=80):
