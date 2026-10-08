@@ -43,3 +43,10 @@ activity:
   walk_counts:                # walk of 20+ min = light workout, never hard
     min_minutes: 20
     not_on_bands: [PUSH]      # on PUSH days walks don't count toward "worked out today"
+
+checkin:                      # how energy/soreness adjust today's band (enforced in code)
+  recover_if:  {energy_at_most: 2, soreness_at_least: 4}   # either one -> recover
+  down_one_if: {energy_at_most: 3, soreness_at_least: 3}   # either one -> one level down
+
+strength:
+  split: [Push, Pull, Legs]   # next day rotates from the last done strength session

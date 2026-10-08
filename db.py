@@ -58,7 +58,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     feeling          TEXT,
     done_at          TEXT,               -- ISO local time it was reported done
     actual_start     TEXT,               -- ISO local, used to de-duplicate against Oura workouts
-    actual_end       TEXT
+    actual_end       TEXT,
+    done_by          TEXT,               -- chat / oura (who marked it done)
+    details_json     TEXT                -- numbers and reasons behind the plan (for /why)
 );
 
 CREATE TABLE IF NOT EXISTS context_notes (
@@ -97,6 +99,8 @@ CREATE TABLE IF NOT EXISTS runs (
 DAILY_LOG_FIELDS = {"metrics_json", "food_targets_json"}
 # M2 kept per-plan fields in daily_log; M3 moves them to sessions.
 OLD_DAILY_LOG_COLUMNS = ["food_notes", "checkin_json", "plan", "policy_json", "completed", "feeling"]
+# Columns added to sessions after M3 (M3.1).
+NEW_SESSION_COLUMNS = ["done_by", "details_json"]
 FOOD_FIELDS = ["entry_type", "est_protein_g", "est_fiber_g", "est_carbs_g", "est_calories",
                "est_caffeine_mg", "alcohol_drinks", "confidence"]
 
@@ -147,12 +151,15 @@ def _needs_migration() -> bool:
     with connect() as conn:
         daily = _columns(conn, "daily_log")
         food = _columns(conn, "food_log")
+        sessions = _columns(conn, "sessions")
     old_daily = bool(daily) and (bool(daily & set(OLD_DAILY_LOG_COLUMNS)) or "food_targets_json" not in daily)
-    return old_daily or (bool(food) and "logged_at" not in food)
+    old_sessions = bool(sessions) and not set(NEW_SESSION_COLUMNS) <= sessions
+    return old_daily or (bool(food) and "logged_at" not in food) or old_sessions
 
 
 def _migrate(conn) -> None:
-    """M2 -> M3: per-plan fields move from daily_log to sessions; food_log gains logged_at."""
+    """M2 -> M3: per-plan fields move from daily_log to sessions; food_log gains logged_at.
+    M3 -> M3.1: sessions gains done_by and details_json."""
     daily = _columns(conn, "daily_log")
     if "plan" in daily:
         rows = conn.execute("SELECT * FROM daily_log WHERE plan IS NOT NULL").fetchall()
@@ -174,6 +181,10 @@ def _migrate(conn) -> None:
     for column in OLD_DAILY_LOG_COLUMNS:
         if column in daily:
             conn.execute(f"ALTER TABLE daily_log DROP COLUMN {column}")
+    sessions = _columns(conn, "sessions")
+    for column in NEW_SESSION_COLUMNS:
+        if column not in sessions:
+            conn.execute(f"ALTER TABLE sessions ADD COLUMN {column} TEXT")
     if "logged_at" not in _columns(conn, "food_log"):
         conn.execute("ALTER TABLE food_log ADD COLUMN logged_at TEXT")
         conn.execute("UPDATE food_log SET logged_at = timestamp")
@@ -246,7 +257,7 @@ def _session(row) -> dict | None:
     if row is None:
         return None
     s = dict(row)
-    for key in ("plan_json", "llm_plan_json", "override_reasons"):
+    for key in ("plan_json", "llm_plan_json", "override_reasons", "details_json"):
         s[key] = json.loads(s[key]) if s[key] else None
     return s
 
@@ -282,13 +293,14 @@ def thread_exists(thread_id: str) -> bool:
         return conn.execute("SELECT 1 FROM sessions WHERE thread_id = ?", (thread_id,)).fetchone() is not None
 
 
-def finish_session(session_id: int, checkin: dict, plan: dict, llm_plan: dict, overrides: list[str]) -> None:
+def finish_session(session_id: int, checkin: dict, plan: dict, llm_plan: dict, overrides: list[dict],
+                   details: dict) -> None:
     with connect() as conn:
         conn.execute(
             "UPDATE sessions SET status = 'planned', energy = ?, soreness = ?, note = ?, plan_json = ?, "
-            "llm_plan_json = ?, overridden = ?, override_reasons = ? WHERE id = ?",
+            "llm_plan_json = ?, overridden = ?, override_reasons = ?, details_json = ? WHERE id = ?",
             (checkin.get("energy"), checkin.get("soreness"), checkin.get("note"), json.dumps(plan),
-             json.dumps(llm_plan), int(bool(overrides)), json.dumps(overrides), session_id),
+             json.dumps(llm_plan), int(bool(overrides)), json.dumps(overrides), json.dumps(details), session_id),
         )
 
 
@@ -306,6 +318,36 @@ def latest_open_session(day: date) -> dict | None:
             (day.isoformat(),),
         ).fetchone()
     return _session(row)
+
+
+def latest_planned_session(day: date) -> dict | None:
+    """Today's most recent plan (done or not), for /why and the router's last question."""
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM sessions WHERE date = ? AND status = 'planned' ORDER BY id DESC LIMIT 1",
+            (day.isoformat(),),
+        ).fetchone()
+    return _session(row)
+
+
+def open_planned_sessions(day: date) -> list[dict]:
+    """Today's plans not marked done, oldest first."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM sessions WHERE date = ? AND status = 'planned' AND completed IS NULL ORDER BY id",
+            (day.isoformat(),),
+        ).fetchall()
+    return [_session(r) for r in rows]
+
+
+def done_strength_sessions() -> list[dict]:
+    """Done strength sessions, oldest first (for the split rotation)."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM sessions WHERE completed = 1 AND json_extract(plan_json, '$.workout_type') = 'strength' "
+            "ORDER BY date, id",
+        ).fetchall()
+    return [_session(r) for r in rows]
 
 
 def latest_checkin(day: date) -> dict | None:
@@ -327,14 +369,14 @@ def count_planned(day: date) -> int:
 
 
 def mark_done(session_id: int, feeling: str | None, done_at: datetime,
-              actual_start: datetime | None, actual_end: datetime | None) -> None:
+              actual_start: datetime | None, actual_end: datetime | None, done_by: str = "chat") -> None:
     with connect() as conn:
         conn.execute(
-            "UPDATE sessions SET completed = 1, feeling = ?, done_at = ?, actual_start = ?, actual_end = ? "
-            "WHERE id = ?",
+            "UPDATE sessions SET completed = 1, feeling = ?, done_at = ?, actual_start = ?, actual_end = ?, "
+            "done_by = ? WHERE id = ?",
             (feeling, done_at.isoformat(timespec="seconds"),
              actual_start and actual_start.isoformat(timespec="seconds"),
-             actual_end and actual_end.isoformat(timespec="seconds"), session_id),
+             actual_end and actual_end.isoformat(timespec="seconds"), done_by, session_id),
         )
 
 
@@ -343,7 +385,7 @@ def add_unplanned(day: date, workout_type: str, duration_min: int | None, start:
     with connect() as conn:
         cur = conn.execute(
             "INSERT INTO sessions (date, status, source, plan_json, completed, feeling, done_at, "
-            "actual_start, actual_end) VALUES (?, 'unplanned', 'unplanned', ?, 1, ?, ?, ?, ?)",
+            "actual_start, actual_end, done_by) VALUES (?, 'unplanned', 'unplanned', ?, 1, ?, ?, ?, ?, 'chat')",
             (day.isoformat(), json.dumps({"workout_type": workout_type, "duration_min": duration_min}),
              feeling, done_at.isoformat(timespec="seconds"), start.isoformat(timespec="seconds"),
              end.isoformat(timespec="seconds")),

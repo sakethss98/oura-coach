@@ -55,8 +55,10 @@ def print_report(state: dict, demo: bool) -> None:
     for key, label in LABELS.items():
         m = comparison[key]
         print(f"{label:<13}{fmt(m['today']):>7}{fmt(m['avg_7d']):>8}{fmt(m['delta']):>7}  {m['status']}")
-    band = state["baseline"]["band"]
+    band, effective = state["baseline"]["band"], state["band"]
     print(f"Band: {band['band'].upper()} ({band['reason']})")
+    if effective["changed_by_checkin"]:
+        print(f"After check-in: {effective['band'].upper()} ({effective['reason']})")
     print(f"Sleep {fmt(today['sleep_hours'])} h | stress {fmt(today['stress_summary'])} | steps {fmt(today['steps'])}")
 
     schedule = state["schedule"]
@@ -79,12 +81,20 @@ def print_report(state: dict, demo: bool) -> None:
     if c["context_notes"]:
         print("Context: " + "; ".join(c["context_notes"]))
 
-    print(f"\nWorkout:   {final['workout_type']}  (intensity {final['intensity']}/5)")
+    split = f" ({final['split_day']})" if final.get("split_day") else ""
+    print(f"\nWorkout:   {final['workout_type']}{split}  (intensity {final['intensity']}/5)"
+          f"  [{state['plan_source']} plan]")
     print(f"When:      {final['time_slot']}  ({final['duration_min']} min)")
-    print(f"Why:       {final['reasoning']}")
-    print(f"Nutrition: {final['nutrition_note']}")
-    if final["meal_ideas"]:
-        print("Meals:     " + "\n           ".join(final["meal_ideas"]))
+    for n, e in enumerate(final["exercises"], 1):
+        print(f"           {n}. {e['name']} · {e['sets_reps']}")
+    if final.get("exercises_note"):
+        print(f"           {final['exercises_note']}")
+    print(f"Why:       {final['why']}")
+    print(f"Reasoning: {final['reasoning']}")
+    print(f"Before:    {final['food_before'] or '-'}")
+    print(f"After:     {final['food_after']}  [{final['food_source']}]")
+    if final["follow_up"]:
+        print(f"Question:  {final['follow_up']}")
     if final["rules_applied"]:
         print("Rules:     " + "\n           ".join(final["rules_applied"]))
 
@@ -92,8 +102,8 @@ def print_report(state: dict, demo: bool) -> None:
         llm = state["llm_plan"]
         print(f"\nPolicy override (LLM proposed {llm['workout_type']}, intensity {llm['intensity']}, "
               f"{llm['time_slot']}):")
-        for reason in overrides:
-            print(f"  - {reason}")
+        for o in overrides:
+            print(f"  - {o['text']}")
     else:
         print("\nPolicy check: passed, no changes.")
     print(f"\n(model: {OPENAI_MODEL})")
@@ -128,7 +138,7 @@ def main(argv: list[str] | None = None) -> dict:
     try:
         app = build_graph(SqliteSaver(conn))
         waiting = start_run(app, now, args.fixtures, hide_history_from_llm=args.simulate_hard_yesterday)
-        answer = {"energy": args.energy, "soreness": args.soreness, "note": None, "label": "from run.py flags"}
+        answer = {"energy": args.energy, "soreness": args.soreness, "note": None, "label": "from the command line"}
         state = resume_run(app, waiting["thread_id"], answer, now)
     finally:
         conn.close()

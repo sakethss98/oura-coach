@@ -30,7 +30,7 @@ def test_run_with_checkin_flags(temp_demo, capsys):
 
 def test_simulate_hard_yesterday_triggers_override_and_cleans_up(temp_demo, fake_llm):
     state = run.main(["--fixtures", "--at", "07:00", "--simulate-hard-yesterday"])
-    assert any("back-to-back" in o for o in state["overrides"])
+    assert any("back-to-back" in o["text"] for o in state["overrides"])
     assert state["final_plan"]["workout_type"] == "easy_run"
     assert "yesterday_hard" not in fake_llm.calls[-1][1]              # hidden from the LLM
     all_sessions = db.sessions_between(date(2000, 1, 1), date(2100, 1, 1))

@@ -51,3 +51,30 @@ def test_walk_with_no_plan_is_a_new_activity():
     [walk] = route("went for a 30 min walk", NOW, False, None)
     assert walk.type == "workout_done" and walk.refers_to_plan is False
     assert walk.workout_type == "walk" and walk.duration_min == 30
+
+
+def test_why_question_routes_to_why():
+    assert [a.type for a in route("why?", NOW, False, None)] == ["why"]
+
+
+def test_yes_to_the_coachs_question_becomes_a_question():
+    [answer] = route("yes", NOW, False, None, last_question="Want a 10-minute stretch you can do anytime?")
+    assert answer.type == "question" and "stretch" in answer.text.lower()
+
+
+def test_live_plan_text_has_no_internal_terms():
+    """One real plan on fixtures: what the person reads must be plain words."""
+    import re
+    from datetime import time
+
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    from graph import build_graph, resume_run, start_run
+    from today import fixtures_now
+
+    app, now = build_graph(InMemorySaver()), fixtures_now(time(7, 0))
+    state = resume_run(app, start_run(app, now, True)["thread_id"], {"energy": 4, "soreness": 2, "note": None}, now)
+    internal = re.compile(r"\b[a-z]+_[a-z_]+\b|\bnull\b|\bwindow\b|\bband\b", re.I)
+    plan = state["final_plan"]
+    for text in (plan["why"], plan["food_before"], plan["food_after"], plan["follow_up"]):
+        assert not internal.findall(text), text

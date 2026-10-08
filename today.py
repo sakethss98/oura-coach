@@ -3,6 +3,8 @@
 Shared by the graph (fetch_data / gather_today), /today, and food questions, so they all
 see the same numbers. Oura and the calendar are re-fetched on every call; the database is
 read fresh too, so nothing depends on leftovers from an earlier run.
+
+The one write: `sync_oura_completions` marks a plan done when Oura recorded it (idempotent).
 """
 from datetime import date, datetime, time, timedelta
 
@@ -10,7 +12,7 @@ import yaml
 
 import activity
 import db
-from baseline import compute_baseline, food_totals
+from baseline import compute_baseline, effective_band, food_totals
 from calendar_client import fetch_calendar, fixture_calendar, plan_window, schedule_for
 from config import DAY_END_HOUR, DAY_START_HOUR, GOALS_PATH, TZ
 from nutrition import daily_targets, recent_food, remaining
@@ -78,7 +80,7 @@ def window_now(schedule: dict, day: date, now: datetime) -> list[str] | None:
 def _public(item: dict) -> dict:
     """An activity item with times as HH:MM strings (for state, prompts and replies)."""
     return {
-        "source": item["source"], "activity": item["activity"], "minutes": item["minutes"],
+        "source": item["source"], "activity": item["activity"], "label": item["label"], "minutes": item["minutes"],
         "start": _hm(item["start"]) if item["start"] else None,
         "end": _hm(item["end"]) if item["end"] else None,
         "hard": item["hard"], "feeling": item["feeling"],
@@ -97,8 +99,20 @@ def day_activity(day: date, oura_workouts_by_day: dict, rules: dict) -> dict[str
     return result
 
 
+def sync_oura_completions(day: date, oura_workouts_by_day: dict, rules: dict) -> list[int]:
+    """Mark today's open plans done when Oura recorded a matching workout around the planned time."""
+    oura = activity.oura_items(oura_workouts_by_day.get(day.isoformat(), []), rules)
+    done = []
+    for session, workout in activity.match_open_plans(db.open_planned_sessions(day), oura):
+        db.mark_done(session["id"], None, workout["end"], workout["start"], workout["end"], done_by="oura")
+        done.append(session["id"])
+    return done
+
+
 def day_context(day: date, now: datetime, oura: dict, schedule: dict, band: str, goals: dict) -> dict:
+    """`band` is today's effective band (after the check-in); the walk rule uses it."""
     rules = goals["activity"]
+    sync_oura_completions(day, oura["workouts_by_day"], rules)
     items = day_activity(day, oura["workouts_by_day"], rules)
     today_items = items[day.isoformat()]
     yesterday_items = items[(day - timedelta(days=1)).isoformat()]
@@ -129,6 +143,7 @@ def day_context(day: date, now: datetime, oura: dict, schedule: dict, band: str,
         "recent_food": recent_food(food_today, now),
         "context_notes": db.active_context_notes(day),
         "first_plan_today": db.count_planned(day) == 0,
+        "next_split_day": activity.next_split_day(db.done_strength_sessions(), goals["strength"]["split"]),
         "sessions_today": [s for s in db.sessions_between(day, day)],
     }
 
@@ -140,11 +155,14 @@ def snapshot(now: datetime, use_fixtures: bool) -> dict:
     oura = fetch_oura(day, use_fixtures)
     schedule = fetch_schedule(day, use_fixtures)
     baseline = compute_baseline(oura["today"], oura["history"], goals["schedule"]["readiness_floor"])
+    latest = db.latest_checkin(day)
+    band = effective_band(baseline["band"], latest, goals["checkin"])
     return {
         "day": day.isoformat(),
         "oura": oura,
         "schedule": schedule,
         "baseline": baseline,
+        "band": band,
         "goals": goals,
-        **day_context(day, now, oura, schedule, baseline["band"]["band"], goals),
+        **day_context(day, now, oura, schedule, band["band"], goals),
     }

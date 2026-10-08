@@ -18,7 +18,7 @@ from chat import HELP, Coach
 from config import CHECKPOINT_DB_PATH, DEMO_CHECKPOINT_DB_PATH, DEMO_DB_PATH, env, redact
 from graph import build_graph
 
-COMMANDS = ["checkin", "plan", "food", "note", "undo", "today", "help", "start"]
+COMMANDS = ["checkin", "plan", "food", "note", "undo", "today", "why", "help", "start"]
 TELEGRAM_MAX_CHARS = 4000
 
 logger = logging.getLogger("oura-coach")

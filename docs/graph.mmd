@@ -10,16 +10,20 @@ graph TD;
 	checkin(checkin)
 	gather_today(gather_today)
 	plan(plan)
+	rest_plan(rest_plan)
 	policy_check(policy_check)
 	log(log)
 	__end__([<p>__end__</p>]):::last
 	__start__ --> fetch_data;
 	checkin --> gather_today;
-	compute_baseline --> checkin;
+	compute_baseline -. &nbsp;ask check-in&nbsp; .-> checkin;
+	compute_baseline -. &nbsp;check-in known&nbsp; .-> gather_today;
 	fetch_data --> compute_baseline;
-	gather_today --> plan;
+	gather_today -. &nbsp;time left&nbsp; .-> plan;
+	gather_today -. &nbsp;no time left&nbsp; .-> rest_plan;
 	plan --> policy_check;
 	policy_check --> log;
+	rest_plan --> policy_check;
 	log --> __end__;
 	classDef default fill:#f2f0ff,line-height:1.2
 	classDef first fill-opacity:0

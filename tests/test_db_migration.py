@@ -80,3 +80,18 @@ def test_fresh_database_needs_no_backup(tmp_path):
         assert backups(tmp_path / "oura_coach.db") == []
     finally:
         db.set_db_path(DB_PATH)
+
+
+def test_m3_database_gets_new_session_columns_after_a_backup(tmp_path):
+    path = tmp_path / "oura_coach.db"
+    db.set_db_path(path)
+    try:
+        db.init_db()
+        with sqlite3.connect(path) as conn:       # make it look like an M3 database
+            conn.execute("ALTER TABLE sessions DROP COLUMN details_json")
+            conn.execute("ALTER TABLE sessions DROP COLUMN done_by")
+        db.init_db()
+        assert len(backups(path)) == 1
+        assert {"details_json", "done_by"} <= columns(path, "sessions")
+    finally:
+        db.set_db_path(DB_PATH)

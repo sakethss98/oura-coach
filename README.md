@@ -75,9 +75,31 @@ Talk to it in plain messages:
 | `did the run, felt heavy` | Marks your latest plan done |
 | `went for a 30 min walk` | Logs an unplanned workout |
 | `what should I eat for dinner?` | Answers from today's data (food so far vs targets) |
+| `why?` or `/why` | The full reasoning, numbers and code changes behind your latest plan |
+| `done` | Marks your latest plan done (Oura also marks it if it records a matching workout within an hour of the planned time) |
 
 Commands: `/checkin`, `/plan` (plan now, reusing today's latest check-in), `/food <text>`,
-`/note <text>`, `/undo` (last food or note), `/today`, `/help`.
+`/note <text>`, `/undo` (last food or note), `/today`, `/why`, `/help`.
+
+A plan message is short; details live behind `/why`:
+
+```
+🔋 Readiness 82
+🏃 HIIT · 30 min · 6:30–7:00pm
+Today: 2218 kcal · 126g protein
+
+Why: Your readiness is 82 and HRV is above your usual, so it's a good day to push.
+
+🍽 Before: A banana or 2 dates 30 minutes before
+After: Paneer bhurji with 2 rotis to cover most of the protein left
+
+Reply "done" when you finish, or I'll mark it from Oura if it records it.
+```
+
+Your check-in counts: low energy or high soreness lowers how hard today can be
+(`checkin` thresholds in `goals.yaml`), and code enforces it. Strength days follow the
+Push / Pull / Legs split in `goals.yaml`, rotating from your last done strength session;
+the coach lists 5-6 exercises for that day.
 
 Daily food targets are computed in code from your Oura `personal_info` (age, weight, height,
 sex) with the Mifflin-St Jeor formula and the coefficients in `goals.yaml` (`nutrition`).
@@ -87,7 +109,9 @@ sex) with the Mifflin-St Jeor formula and the coefficients in `goals.yaml` (`nut
 ![Coach graph](docs/graph.png)
 
 One LangGraph thread per check-in (`checkin-YYYY-MM-DD-HHMM`), checkpointed in SQLite, so a
-check-in survives a bot restart. Redraw with `python scripts/draw_graph.py`. Explore it in
+check-in survives a bot restart. The dotted edges are real decisions: the check-in question is
+skipped when the answer is already known (`/plan`, `run.py`), and when no free time is left today
+`rest_plan` builds a rest plan in code without calling the LLM. Redraw with `python scripts/draw_graph.py`. Explore it in
 LangGraph Studio with `langgraph dev` (always runs on fixtures and demo.db).
 
 On first start after upgrading from M2, `oura_coach.db` is copied to
@@ -102,15 +126,16 @@ On first start after upgrading from M2, `oura_coach.db` is copied to
 | `oura_client.py` | Oura API v2 client (refresh on 401), `daily_metrics()` and `body_metrics()` parsers |
 | `calendar_client.py` | iCal feed → busy blocks, all-day events, free slots, `plan_window()` |
 | `scripts/smoke_test.py` | End-to-end check of the data layer (also saves `fixtures/`) |
-| `baseline.py` | Today vs 7-day baseline, readiness band, food sums (pure functions) |
-| `activity.py` | Oura workouts merged with sessions reported in chat; hard / worked-out rules |
+| `baseline.py` | Today vs 7-day baseline, readiness band, check-in-adjusted band, food sums (pure functions) |
+| `activity.py` | Oura workouts merged with sessions reported in chat; hard / worked-out rules; Oura auto-complete; strength split rotation |
 | `nutrition.py` | Daily food targets and what is left of them |
 | `timeparse.py` | "at 1", "8am" → times; "Thu"-"Sat" → dates |
 | `policy.py` | Hard training rules enforced in code after the LLM plan |
 | `today.py` | One view of today (Oura, calendar, food, activity, targets) shared by graph and chat |
 | `schemas.py` | Pydantic models for structured LLM output (`Plan`, `FoodEstimate`, `RouterResult`, `Answer`) |
 | `llm.py` | ChatOpenAI wrapper; records every call in the `runs` table |
-| `graph.py` | LangGraph: fetch_data → compute_baseline → checkin ⏸ → gather_today → plan → policy_check → log |
+| `graph.py` | LangGraph: fetch_data → compute_baseline → [checkin ⏸] → gather_today → plan / rest_plan → policy_check → log |
+| `labels.py` | Human labels, emoji and 12-hour times for everything shown in chat |
 | `router.py` | One LLM call that turns a message into actions |
 | `chat.py` | Message in, reply out (no Telegram code; tested offline) |
 | `bot.py` | Telegram glue |

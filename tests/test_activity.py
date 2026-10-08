@@ -94,3 +94,66 @@ def test_chat_walk_counts_except_on_push_days():
     assert worked_out(walk, "PUSH", RULES) is None
     assert worked_out(walk, "push", RULES) is None
     assert hard_reason(walk) is None
+
+
+# --- Oura completes an open plan (matching type, planned slot +/- 60 min) -------
+
+from activity import match_open_plans, next_split_day  # noqa: E402
+
+
+def open_plan(workout_type, slot="06:30-07:00", completed=None, split_day=None):
+    return {"id": 7, "date": "2026-10-07", "completed": completed, "feeling": None, "source": "planned",
+            "plan_json": {"workout_type": workout_type, "intensity": 3, "time_slot": slot, "split_day": split_day},
+            "actual_start": None, "actual_end": None}
+
+
+def test_oura_run_near_the_planned_time_completes_a_run_plan():
+    assert len(match_open_plans([open_plan("easy_run")], oura_items([oura("running", t(7, 20), 30)], RULES))) == 1
+
+
+def test_oura_run_more_than_an_hour_after_the_slot_does_not():
+    assert match_open_plans([open_plan("easy_run")], oura_items([oura("running", t(8, 40), 30)], RULES)) == []
+
+
+def test_oura_walk_does_not_complete_a_run_plan():
+    assert match_open_plans([open_plan("easy_run")], oura_items([oura("walking", t(6, 40), 30)], RULES)) == []
+
+
+def test_hiit_plan_matches_any_oura_activity():
+    assert match_open_plans([open_plan("HIIT")], oura_items([oura("strengthTraining", t(6, 35), 25)], RULES))
+
+
+def test_done_or_rest_plans_are_not_matched():
+    workouts = oura_items([oura("running", t(6, 35), 25)], RULES)
+    assert match_open_plans([open_plan("easy_run", completed=1), open_plan("rest", slot="none")], workouts) == []
+
+
+# --- strength split rotation ------------------------------------------------
+
+SPLIT = ["Push", "Pull", "Legs"]
+
+
+def strength(split_day, completed=1):
+    return open_plan("strength", completed=completed, split_day=split_day)
+
+
+def test_split_starts_at_push():
+    assert next_split_day([], SPLIT) == "Push"
+
+
+def test_split_rotates_from_the_last_done_session():
+    assert next_split_day([strength("Push")], SPLIT) == "Pull"
+    assert next_split_day([strength("Push"), strength("Pull")], SPLIT) == "Legs"
+    assert next_split_day([strength("Legs")], SPLIT) == "Push"
+
+
+def test_split_skips_sessions_without_a_day_or_not_done():
+    assert next_split_day([strength("Push"), strength(None)], SPLIT) == "Pull"
+    assert next_split_day([strength("Push"), strength("Pull", completed=None)], SPLIT) == "Pull"
+
+
+def test_walk_rule_uses_the_band_it_is_given():
+    # graph passes the check-in-adjusted band: a PUSH day lowered to maintain makes a 30-min walk count
+    walk = items([oura("walking", t(7), 30)])
+    assert worked_out(walk, "push", RULES) is None
+    assert worked_out(walk, "maintain", RULES) == "30-min walk at 7:00am"

@@ -41,8 +41,9 @@ class FakeLLM:
 
     def __init__(self):
         self.plan = Plan(workout_type="HIIT", intensity=5, time_slot="07:00-07:40", duration_min=40,
-                         reasoning="stub", nutrition_note="stub note", meal_ideas=["Poha", "Dal + roti"],
-                         rules_applied=[])
+                         why="Your readiness looks good, so let's push.", reasoning="stub reasoning",
+                         food_before="A banana 30 minutes before", food_after="Paneer bhurji with 2 rotis",
+                         follow_up="", exercises=[], rules_applied=[])
         self.food_calories = 450.0
         self.routes: dict[str, list[RouterAction]] = {}
         self.calls: list[tuple[str, str]] = []

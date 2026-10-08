@@ -61,14 +61,58 @@ def test_second_plan_after_a_done_workout_is_light_and_has_no_meal_ideas(temp_db
     app = build_graph(InMemorySaver())
     morning = fixtures_now(time(7, 0))
     first = resume_run(app, start_run(app, morning, True)["thread_id"], ANSWER, morning)
-    assert first["context"]["first_plan_today"] and first["final_plan"]["meal_ideas"]
+    assert first["context"]["first_plan_today"]
     session = db.latest_open_session(morning.date())
     db.mark_done(session["id"], "heavy", morning + timedelta(hours=1), morning, morning + timedelta(minutes=40))
 
     evening = fixtures_now(time(18, 0))
     second = resume_run(app, start_run(app, evening, True)["thread_id"], ANSWER, evening)
     assert not second["context"]["first_plan_today"]
-    assert second["final_plan"]["meal_ideas"] == []
     assert second["final_plan"]["workout_type"] == "walk"             # stub proposed HIIT
-    assert any("Already worked out today" in o for o in second["overrides"])
+    assert any(o["rule"] == "worked_out" for o in second["overrides"])
+    assert second["final_plan"]["food_source"] == "code"              # food lines match the walk
+    assert second["final_plan"]["food_before"] == ""
     assert second["context"]["remaining"] is not None
+
+
+# --- conditional edges --------------------------------------------------------
+
+def nodes_run(app, now, checkin):
+    thread_id = f"t-{now:%H%M}"
+    names = []
+    for update in app.stream({"use_fixtures": True, "thread_id": thread_id, "now": now.isoformat(),
+                              "checkin": checkin}, config={"configurable": {"thread_id": thread_id}},
+                             stream_mode="updates"):
+        names.extend(update)
+    return names
+
+
+def test_known_checkin_skips_the_checkin_node(temp_db, fake_llm, empty_calendar):
+    names = nodes_run(build_graph(InMemorySaver()), fixtures_now(time(7, 0)),
+                      {"energy": 4, "soreness": 2, "note": None, "label": "skipped"})
+    assert names == ["fetch_data", "compute_baseline", "gather_today", "plan", "policy_check", "log"]
+
+
+def test_no_time_left_takes_rest_plan_without_an_llm_call(temp_db, fake_llm, empty_calendar):
+    app = build_graph(InMemorySaver())
+    now = fixtures_now(time(20, 45))                       # 15 min before 21:00: no usable time
+    waiting = start_run(app, now, use_fixtures=True)
+    state = resume_run(app, waiting["thread_id"], ANSWER, now)
+    assert fake_llm.calls == []                            # no plan call at all
+    assert state["plan_source"] == "code"
+    assert state["final_plan"]["workout_type"] == "rest"
+    assert state["final_plan"]["why"] == "Your body could handle more, but there's no free time left today."
+    assert state["final_plan"]["follow_up"]
+    session = db.latest_planned_session(now.date())
+    assert session["details_json"]["plan_source"] == "code"
+    assert session["details_json"]["window"] is None
+
+
+def test_checkin_lowers_the_band_before_planning(temp_db, fake_llm, empty_calendar):
+    app = build_graph(InMemorySaver())
+    now = fixtures_now(time(7, 0))
+    state = resume_run(app, start_run(app, now, True)["thread_id"], {"energy": 2, "soreness": 2, "note": None}, now)
+    assert state["band"]["band"] == "recover" and state["band"]["changed_by_checkin"]
+    assert '"level": "recover"' in fake_llm.calls[-1][1]   # the LLM sees the adjusted level
+    assert state["final_plan"]["workout_type"] == "walk"
+    assert all(o["rule"] == "checkin" for o in state["overrides"] if o["changes_type"])

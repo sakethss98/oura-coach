@@ -65,3 +65,31 @@ def recent_food(entries: list[dict], now: datetime) -> list[dict]:
             result.append({"minutes_ago": round((now - eaten_at).total_seconds() / 60),
                            "calories": e["est_calories"] or 0, "text": e["raw_text"]})
     return result
+
+
+# Code-picked food lines, used when there is no LLM text that fits the final plan
+# (no time left today, or code changed the workout the LLM wrote food for).
+HIGH_PROTEIN_MEAL = "Paneer bhurji with 2 rotis and a bowl of dal"
+MEDIUM_PROTEIN_MEAL = "Rajma or chole with rice and a bowl of curd"
+LIGHT_MEAL = "Moong dal khichdi with curd"
+BEFORE = {
+    "HIIT": "A banana or 2 dates about 30 minutes before",
+    "easy_run": "A banana or a small bowl of poha if you're hungry",
+    "long_run": "Poha or 2 slices of toast with peanut butter about an hour before",
+    "strength": "A bowl of curd with fruit about an hour before",
+}
+
+
+def fallback_meal(remaining: dict | None) -> str:
+    """One vegetarian Indian meal, picked by how much protein is still left today."""
+    protein_left = remaining["protein_g"] if remaining else 0
+    if protein_left >= 40:
+        return HIGH_PROTEIN_MEAL
+    if protein_left >= 15:
+        return MEDIUM_PROTEIN_MEAL
+    return LIGHT_MEAL
+
+
+def fallback_before(workout_type: str) -> str:
+    """A light pre-workout option; nothing needed before a walk, mobility or rest."""
+    return BEFORE.get(workout_type, "")

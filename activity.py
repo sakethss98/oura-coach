@@ -5,9 +5,13 @@ Pure functions. `rules` is the `activity` section of goals.yaml:
   walk_counts: {min_minutes: N, not_on_bands: [...]}   when a walk counts as a light workout
 
 A session and an Oura workout whose times overlap are the same activity and appear once.
-Only sessions marked done (or logged as unplanned) count; a plan I never confirmed does not.
+Only sessions marked done (or logged as unplanned) count; a plan I never confirmed does not,
+unless Oura recorded a matching workout around the planned time (`match_open_plans`).
 """
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
+
+from config import TZ
+from labels import clock, oura_label, workout_label
 
 HARD_TYPES = {"HIIT", "long_run"}
 HARD_INTENSITY = 4
@@ -16,6 +20,11 @@ OURA_RUN = "running"
 OURA_WALK = "walking"
 # A done session with no known length gets this much time before the report, for overlap only.
 UNKNOWN_DURATION = timedelta(minutes=60)
+# An Oura workout completes an open plan if it overlaps the planned slot widened by this much.
+OURA_MATCH_SLACK = timedelta(minutes=60)
+# Which Oura activities can complete a planned type (None = any activity).
+OURA_MATCHES = {"easy_run": {"running"}, "long_run": {"running"}, "walk": {"walking"},
+                "strength": {"strengthTraining"}, "HIIT": None, "mobility": None}
 
 
 def _dt(value) -> datetime | None:
@@ -32,6 +41,7 @@ def oura_items(workouts: list[dict], rules: dict) -> list[dict]:
         items.append({
             "source": "oura",
             "activity": w["activity"],
+            "label": oura_label(w["activity"]),
             "workout_type": None,
             "start": _dt(w["start"]),
             "end": _dt(w["end"]),
@@ -60,6 +70,7 @@ def session_items(sessions: list[dict], rules: dict) -> list[dict]:
             "source": "session",
             "session_id": s["id"],
             "activity": workout_type,
+            "label": workout_label(workout_type, plan.get("split_day")),
             "workout_type": workout_type,
             "start": start,
             "end": end,
@@ -92,6 +103,7 @@ def merge_activity(oura: list[dict], sessions: list[dict]) -> list[dict]:
             **s,
             "source": "both",
             "activity": f"{s['workout_type']} (Oura: {', '.join(o['activity'] for o in matches)})",
+            "label": s["label"],
             "start": min(o["start"] for o in matches),
             "end": max(o["end"] for o in matches),
             "minutes": sum(o["minutes"] for o in matches),
@@ -111,9 +123,11 @@ def counts_as_workout(item: dict, band: str, rules: dict) -> bool:
 
 
 def describe(item: dict) -> str:
-    when = f" at {item['start']:%H:%M}" if item["start"] else ""
-    minutes = f"{item['minutes']} min " if item["minutes"] is not None else ""
-    return f"{minutes}{item['activity']}{when}"
+    """Plain words, e.g. "35-min run at 7:00am"."""
+    label = item["label"] if item["label"].isupper() else item["label"].lower()
+    when = f" at {clock(item['start'])}" if item["start"] else ""
+    minutes = f"{item['minutes']}-min " if item["minutes"] is not None else ""
+    return f"{minutes}{label}{when}"
 
 
 def worked_out(items: list[dict], band: str, rules: dict) -> str | None:
@@ -126,3 +140,37 @@ def hard_reason(items: list[dict]) -> str | None:
     """Why the day counts as hard, or None."""
     hard = [i for i in items if i["hard"]]
     return ", ".join(describe(i) for i in hard) or None
+
+
+def match_open_plans(open_sessions: list[dict], oura: list[dict]) -> list[tuple[dict, dict]]:
+    """(session, Oura item) pairs where Oura recorded a planned-but-unconfirmed workout.
+
+    Match = a compatible Oura activity overlapping the planned slot widened by 60 min each side.
+    Each Oura workout completes at most one plan.
+    """
+    pairs, used = [], set()
+    for s in open_sessions:
+        plan = s["plan_json"] or {}
+        slot = plan.get("time_slot") or "none"
+        if s["completed"] == 1 or plan.get("workout_type") not in OURA_MATCHES or slot == "none":
+            continue
+        day = date.fromisoformat(s["date"])
+        start, end = (datetime.combine(day, time.fromisoformat(t), TZ) for t in slot.split("-"))
+        allowed = OURA_MATCHES[plan["workout_type"]]
+        for i, o in enumerate(oura):
+            if i in used or (allowed is not None and o["activity"] not in allowed):
+                continue
+            if o["start"] < end + OURA_MATCH_SLACK and start - OURA_MATCH_SLACK < o["end"]:
+                pairs.append((s, o))
+                used.add(i)
+                break
+    return pairs
+
+
+def next_split_day(sessions: list[dict], split: list[str]) -> str:
+    """The split day after the last done strength session that recorded one (oldest-first list)."""
+    for s in reversed(sessions):
+        plan = s["plan_json"] or {}
+        if s["completed"] == 1 and plan.get("workout_type") == "strength" and plan.get("split_day") in split:
+            return split[(split.index(plan["split_day"]) + 1) % len(split)]
+    return split[0]

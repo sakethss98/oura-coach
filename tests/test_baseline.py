@@ -80,3 +80,43 @@ def test_band_recover_when_readiness_below_floor():
 def test_band_recover_when_two_metrics_worse():
     assert readiness_band(statuses(hrv="below", rhr="above"), 70)["band"] == "recover"
     assert readiness_band(statuses(readiness="below", sleep="below"), 70)["band"] == "recover"
+
+
+# --- effective band: the check-in lowers (never raises) the Oura band ----------
+
+from baseline import effective_band  # noqa: E402
+
+CHECKIN_RULES = {"recover_if": {"energy_at_most": 2, "soreness_at_least": 4},
+                 "down_one_if": {"energy_at_most": 3, "soreness_at_least": 3}}
+
+
+def oura(level):
+    return {"band": level, "reason": "r", "plain": "p"}
+
+
+def effective(level, energy=None, soreness=None):
+    return effective_band(oura(level), {"energy": energy, "soreness": soreness}, CHECKIN_RULES)
+
+
+def test_low_energy_or_high_soreness_means_recover():
+    assert effective("push", energy=2, soreness=1)["band"] == "recover"
+    assert effective("push", energy=5, soreness=4)["band"] == "recover"
+    assert effective("push", energy=2)["plain"] == "You said energy 2, so today is a recovery day."
+
+
+def test_middling_checkin_drops_one_level():
+    assert effective("push", energy=3, soreness=1)["band"] == "maintain"
+    assert effective("maintain", energy=4, soreness=3)["band"] == "recover"
+    lowered = effective("push", energy=3, soreness=3)
+    assert lowered["changed_by_checkin"] and lowered["plain"] == (
+        "You said energy 3 and soreness 3, so no hard session today.")
+
+
+def test_good_or_skipped_checkin_changes_nothing():
+    for result in (effective("push", 4, 2), effective("push"), effective_band(oura("push"), None, CHECKIN_RULES)):
+        assert result["band"] == "push" and not result["changed_by_checkin"] and result["plain"] == "p"
+
+
+def test_checkin_never_raises_the_band():
+    assert effective("recover", energy=5, soreness=1)["band"] == "recover"
+    assert effective("recover", energy=3)["band"] == "recover"
