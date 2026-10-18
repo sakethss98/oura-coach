@@ -95,3 +95,12 @@ These came from live use on 2026-10-17.
 - **14b** "how's my day" with 3+ final days stored → the headline compares to their own average ("74 so far, up from your 68 average").
 - **33** No wearable data for the day → training, recovery and movement left out, nutrition re-weighted to 100. Must not: score a missing component 0. (tests/test_score.py)
 - **34** Low readiness, no hard workout → recovery not lowered ("took it easy on a low-readiness day"). (tests/test_score.py)
+
+## Added during Phase 6 (2026-10-18): inferred rest days
+
+Rest days are inferred, never declared: a day with no plan and no workout is a rest day when the week's rest days stay within goals.yaml `rest_days_per_week`, or when it's a recovery rest (low readiness, or a saved context fact like travel or sickness), which doesn't use the budget.
+
+- **35** One rest day within the weekly budget → full training credit, "Rest day — you've trained 5 of the last 7 days".
+- **36** A second ordinary rest day in the same 7 days → training 0 for the day, said plainly. Must not: a question to the user.
+- **37** A low-readiness rest day when the budget is already used → full credit, "Recovery rest — readiness was 64".
+- **38** A rest day covered by a saved travel fact → full credit, "Recovery rest — you noted: …".

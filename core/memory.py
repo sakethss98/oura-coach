@@ -27,6 +27,12 @@ def facts(user, day: date | None = None) -> list[dict]:
     return db.list_memory(user.id, day)
 
 
+def current(user, day: date) -> list[dict]:
+    """Facts that still matter on `day`: undated ones, and dated ones that haven't ended (upcoming included).
+    A dated fact whose last day has passed is no longer loaded (it stays in the database)."""
+    return [f for f in db.list_memory(user.id) if f["end_date"] is None or f["end_date"] >= day.isoformat()]
+
+
 def describe(fact: dict) -> str:
     """One fact in plain words, with its dates if it has any."""
     if fact["start_date"] and fact["end_date"]:

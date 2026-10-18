@@ -74,7 +74,7 @@ def system_prompt(t) -> str:
     lines = [load_prompt("agent"), "",
              f"Now: {t.now:%A %Y-%m-%d %H:%M}. Today (by their sleep): {t.day:%A %Y-%m-%d}."]
     facts = memory.facts(t.user, t.day)
-    lines.append("Saved facts (id: fact):" if facts else "Saved facts: none.")
+    lines.append("Saved facts, oldest first (id: fact):" if facts else "Saved facts: none.")
     lines += [f"- {f['id']}: {memory.describe(f)}" for f in facts]
     for module in enabled_modules(t.user):
         lines.append(f"{module.name.capitalize()}: {module.context(t.user, t.day)}")

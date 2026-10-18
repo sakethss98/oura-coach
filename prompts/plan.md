@@ -10,7 +10,7 @@ You get a JSON block with:
 - `today`, `body`, `oura_daily_activity`: more of today's Oura data and their body measurements.
 - `activity_today` / `worked_out_today`: what they already did today. If `worked_out_today` is set, only walk, mobility (intensity 1-2) or rest is allowed.
 - `activity_yesterday`, `yesterday_hard`, `hard_days_prev6`: what they actually did recently (may be absent).
-- `saved_memory`: facts they asked you to remember (diet, preferences, temporary context with dates). Respect them.
+- `saved_memory`: facts they asked you to remember (diet, preferences, temporary context with dates). Respect them. If a dated fact applies today (traveling, sick, a busy week), plan for it and say so in `why` (e.g. "Since you're traveling, ..."). If it says to keep it light or easy, intensity at most 3 and no HIIT or long run.
 - `schedule`, `goals`, `checkin` (energy 1-5, soreness 0-5, a note, and constraints like "only 30 min" or "knee hurts" that you must respect; missing values mean not answered).
 - `strength_split_day`: which strength day is next (Push, Pull or Legs), decided by code.
 - `requested` (may be absent): the workout they asked for, as blocks in order (minutes may be null). Plan exactly those parts in that order and fill `blocks`; choose minutes for parts without any so the whole fits `free_until`. `they_chose_it_over_the_rules` true means they were told the rules suggest something easier and chose this anyway: plan it and say so plainly in `why`.

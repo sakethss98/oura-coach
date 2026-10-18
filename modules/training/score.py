@@ -11,6 +11,13 @@ The day = the best of its plans, or 1.0 if a counting workout happened before th
 A walk counts at 20+ min (goals.yaml activity.walk_counts); every other workout counts.
 Abandoned plans never reach this function (db.plans_between leaves them out).
 Before the day's cutoff an open plan is "still to do", and `next` says what would still help today.
+
+Rest days are inferred, never declared. A day with no plan and no workout is a rest day (full credit) when
+- it's a recovery rest: low readiness that day, or a saved context fact covering it ("traveling Thu-Sat",
+  "sick"). These don't use up the weekly budget; or
+- the rest days in the 7 days ending today stay within goals.yaml schedule.rest_days_per_week.
+Otherwise it counts as missed (0). A skipped planned session is scored by its plan, as above.
+Days with no data at all (before the wearable or the coach) count neither way.
 """
 from datetime import datetime
 
@@ -22,7 +29,8 @@ from modules.training.blocks import blocks_of
 FULL_SHARE = 0.7      # done minutes / planned minutes that count as done as planned
 
 
-def _counts(item: dict, rules: dict) -> bool:
+def counts(item: dict, rules: dict) -> bool:
+    """A workout that counts for the day (a walk only at 20+ min)."""
     return not item["is_walk"] or (item["minutes"] or 0) >= rules["walk_counts"]["min_minutes"]
 
 
@@ -59,7 +67,7 @@ def score_plan(plan: dict, items: list[dict], rules: dict, day_over: bool = True
         return 1.0, f"{_label(plan)} done"
     if credited:
         return 0.5, f"{_label(plan)} partly done ({credited} of {total} min)"
-    other = [i for i in after if _counts(i, rules)]
+    other = [i for i in after if counts(i, rules)]
     if other:
         return 0.5, f"{describe(other[0])} instead of the planned {_label(plan)}"
     return 0.0, f"{_label(plan)} {'not done' if day_over else 'still to do'}"
@@ -68,16 +76,52 @@ def score_plan(plan: dict, items: list[dict], rules: dict, day_over: bool = True
 WALK_HINT = "a 20-minute walk (it counts as a workout)"
 
 
-def score_day(plans: list[dict], items: list[dict], rules: dict, day_over: bool = True) -> ScoreComponent:
+def recovery_reason(readiness: int | None, readiness_floor: int, context_facts: list[str]) -> str | None:
+    """Why a day without a workout is a recovery rest (low readiness, or a saved context fact), or None."""
+    if readiness is not None and readiness < readiness_floor:
+        return f"readiness was {readiness}"
+    return f"you noted: {context_facts[0]}" if context_facts else None
+
+
+def rest_week(days: list[dict], budget: int) -> dict:
+    """The 7 days ending today, oldest first: [{"known", "worked_out", "recovery"}]. Returns what today's
+    rest decision needs: {"budget", "rest_days_before", "trained_days", "known_days", "recovery"}."""
+    known = [d for d in days if d["known"]]
+    before = [d for d in known[:-1]] if days[-1]["known"] else known
+    return {"budget": budget,
+            "rest_days_before": sum(1 for d in before if not d["worked_out"] and not d["recovery"]),
+            "trained_days": sum(1 for d in known if d["worked_out"]),
+            "known_days": max(len(known), 1),
+            "recovery": days[-1]["recovery"]}
+
+
+def _rest_or_missed(rest: dict | None, day_over: bool) -> ScoreComponent:
+    """No plan and no workout today: an inferred rest day, or a missed one."""
+    if rest is not None:
+        if rest["recovery"]:
+            return ScoreComponent("training", 1.0, f"Recovery rest — {rest['recovery']}", {"rest": rest})
+        used = rest["rest_days_before"] + 1
+        if used <= rest["budget"]:
+            return ScoreComponent("training", 1.0, f"Rest day — you've trained {rest['trained_days']} of the last "
+                                                   f"{rest['known_days']} days", {"rest": rest})
+        if day_over:
+            return ScoreComponent("training", 0.0, f"no workout — {used} rest days in the last {rest['known_days']} "
+                                                   f"(your week has {rest['budget']})", {"rest": rest})
+    return ScoreComponent("training", 0.0, "no workout yet" if not day_over else "no workout",
+                          {"rest": rest}, None if day_over else WALK_HINT)
+
+
+def score_day(plans: list[dict], items: list[dict], rules: dict, day_over: bool = True,
+              rest: dict | None = None) -> ScoreComponent:
     """`plans`: the day's plans (status planned, with blocks_done); `items`: the day's merged activity
-    (activity.merge_activity); `rules`: goals.yaml `activity`; `day_over`: the cutoff has passed."""
+    (activity.merge_activity); `rules`: goals.yaml `activity`; `day_over`: the cutoff has passed;
+    `rest`: rest_week(...) for an inferred rest day (None = no rest days, as before)."""
     plans = [p for p in plans if not _no_time_rest(p)]
-    counting = [i for i in items if _counts(i, rules)]
+    counting = [i for i in items if counts(i, rules)]
     if not plans:
         if counting:
             return ScoreComponent("training", 1.0, describe(counting[0]), {"workouts": len(counting)})
-        return ScoreComponent("training", 0.0, "no workout yet" if not day_over else "no workout", {},
-                              None if day_over else WALK_HINT)
+        return _rest_or_missed(rest, day_over)
 
     per_plan = [(plan["id"], *score_plan(plan, items, rules, day_over)) for plan in plans]
     _, fraction, note = max(per_plan, key=lambda x: x[1])

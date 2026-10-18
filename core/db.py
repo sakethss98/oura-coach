@@ -429,6 +429,20 @@ def get_user_row(user_id: int) -> dict | None:
     return dict(row) if row else None
 
 
+def add_user(telegram_chat_id: str | None, name: str | None = None) -> int:
+    """A new person with the default settings (no saved facts). Returns their id."""
+    s = DEFAULT_SETTINGS
+    with connect() as conn:
+        user_id = conn.execute("INSERT INTO users (telegram_chat_id, name, created_at) VALUES (?, ?, ?)",
+                               (telegram_chat_id, name, _now())).lastrowid
+        conn.execute(
+            "INSERT INTO user_settings (user_id, timezone, enabled_modules, goal_template, goal_rigor, score_cutoff, "
+            "goals_path, session_gap_min) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (user_id, s["timezone"], json.dumps(s["enabled_modules"]), s["goal_template"], s["goal_rigor"],
+             s["score_cutoff"], s["goals_path"], s["session_gap_min"]))
+    return user_id
+
+
 def user_id_for_telegram_chat(chat_id: str) -> int | None:
     with connect() as conn:
         row = conn.execute("SELECT id FROM users WHERE telegram_chat_id = ?", (str(chat_id),)).fetchone()

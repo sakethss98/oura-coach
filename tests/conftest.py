@@ -1,5 +1,7 @@
 import copy
 import json
+import os
+import re
 import sys
 import uuid
 from pathlib import Path
@@ -9,7 +11,7 @@ import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -26,6 +28,68 @@ import today  # noqa: E402
 needs_fixtures = pytest.mark.skipif(
     not (FIXTURES_DIR / "daily_readiness.json").exists(), reason="fixtures/ not present (gitignored)"
 )
+
+
+# --- live scenarios: run N times, report pass rates (docs/scenarios.md "How to grade") ----------------
+
+LIVE_RUNS = int(os.getenv("LIVE_RUNS", "1"))      # LIVE_RUNS=3: every live scenario runs 3 times
+
+
+def live(test):
+    """A live scenario: skipped unless RUN_LIVE_LLM=1, run LIVE_RUNS times (parameter `attempt`)."""
+    test = pytest.mark.usefixtures("attempt")(pytest.mark.live_llm(test))
+    return pytest.mark.skipif(not os.getenv("RUN_LIVE_LLM"), reason="set RUN_LIVE_LLM=1 to call OpenAI")(test)
+
+
+core = pytest.mark.core          # a ★ scenario: must pass every run
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "live_llm: a scenario against the real model")
+    config.addinivalue_line("markers", "core: a ★ scenario (must pass every live run)")
+
+
+def pytest_generate_tests(metafunc):
+    if "attempt" in metafunc.fixturenames:
+        metafunc.parametrize("attempt", range(1, LIVE_RUNS + 1), ids=lambda n: f"run{n}")
+
+
+def pytest_terminal_summary(terminalreporter):
+    """Pass rate per live scenario (★ = core)."""
+    rates = {}
+    for status in ("passed", "failed", "xfailed", "xpassed"):
+        for report in terminalreporter.stats.get(status, []):
+            if getattr(report, "when", "call") != "call" or "live_llm" not in report.keywords:
+                continue
+            name = re.sub(r"\[run\d+\]|run\d+-|-run\d+", "", report.nodeid.split("::")[-1])
+            entry = rates.setdefault(name, {"passed": 0, "runs": 0, "core": "core" in report.keywords, "m4": False})
+            entry["runs"] += 1
+            entry["passed"] += status in ("passed", "xpassed")
+            entry["m4"] |= status in ("xfailed", "xpassed")
+    if not rates:
+        return
+    terminalreporter.write_sep("-", f"live scenarios, pass rate (LIVE_RUNS={LIVE_RUNS}, ★ = must pass every run)")
+    for name, r in sorted(rates.items()):
+        mark = "★" if r["core"] else "M4" if r["m4"] else " "
+        terminalreporter.write_line(f"{mark:>2} {r['passed']}/{r['runs']}  {name}")
+
+
+# --- LLM judge: only "did it answer what was asked" ----------------------------------------------
+
+class Verdict(BaseModel):
+    answered: bool = Field(description="true if the reply answers what they asked or does what they asked")
+    reason: str = Field(description="one short sentence")
+
+
+JUDGE = ("You check one reply from a coaching chatbot. The only question: did the reply answer what the person "
+         "asked, or do what they asked? Judge only that, not tone, length or style. Answer false if it dodges, "
+         "answers a different question, or only asks a question back when no clarification was needed.")
+
+
+def judge(message: str, reply: str) -> Verdict:
+    """The yes/no rubric from docs/scenarios.md (a real model call; live tests only)."""
+    from core.llm import structured_call
+    return structured_call("judge", Verdict, JUDGE, f"They wrote: {message}\nThe reply: {reply}")
 
 
 @pytest.fixture

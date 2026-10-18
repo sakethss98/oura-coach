@@ -2,14 +2,14 @@
 
 Tools: modules/training/tools.py. Score: modules/training/score.py.
 """
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from connectors.health import Health
-from core import db
+from core import db, memory
 from core.labels import clock, workout_label
 from modules.base import NudgeSpec, ScoreComponent
 from modules.training.blocks import blocks_of
-from modules.training.score import score_day
+from modules.training.score import counts, recovery_reason, rest_week, score_day
 
 
 class TrainingModule:
@@ -62,15 +62,32 @@ class TrainingModule:
     def score(self, user, day: date, now: datetime | None = None) -> ScoreComponent:
         """Did the day's plan happen (modules/training/score.py)? Marks what Oura recorded first."""
         import today   # the shared day view (root module); imported here so loading the module stays light
-        rules = user.goals()["activity"]
+        goals = user.goals()
+        rules = goals["activity"]
         bundle = (self.health or Health()).bundle(user, day, now=now)
         today.sync_oura_completions(user, day, bundle["workouts_by_day"], rules)
-        items = today.day_activity(user, day, bundle, rules)[day.isoformat()]
+        week_items = today.day_activity(user, day, bundle, rules)
+        items = week_items[day.isoformat()]
         plans = db.plans_between(user.id, day, day)
         if not plans and not items and bundle["today"]["steps"] is None:
             return ScoreComponent("training", None, "no activity data")    # no wearable data: left out, not 0
         day_over = now is None or now >= datetime.combine(day, user.score_cutoff, user.tz)
-        return score_day(plans, items, rules, day_over)
+        return score_day(plans, items, rules, day_over, self._rest_week(user, day, bundle, week_items, goals))
+
+    @staticmethod
+    def _rest_week(user, day: date, bundle: dict, week_items: dict, goals: dict) -> dict:
+        """Each of the 7 days ending `day`: known (any device data or activity), worked out, recovery rest."""
+        metrics = {m["day"]: m for m in bundle["history"] + [bundle["today"]]}
+        days = []
+        for i in range(6, -1, -1):
+            d = day - timedelta(days=i)
+            m, items = metrics.get(d.isoformat(), {}), week_items.get(d.isoformat(), [])
+            context = [f["text"] for f in memory.facts(user, d) if f["kind"] == "context"]
+            days.append({"known": bool(items) or m.get("steps") is not None or m.get("readiness_score") is not None,
+                         "worked_out": any(counts(item, goals["activity"]) for item in items),
+                         "recovery": recovery_reason(m.get("readiness_score"), goals["schedule"]["readiness_floor"],
+                                                     context)})
+        return rest_week(days, goals["schedule"]["rest_days_per_week"])
 
     def help_lines(self) -> list[str]:
         return ['"want to work out now": I ask how you feel, then plan a workout for right now',

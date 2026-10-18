@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Annotated
 
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
@@ -76,9 +76,18 @@ def remember(fact: str, kind: str, start_text: str | None, end_text: str | None,
     return as_json({"saved": True, "id": fact_row["id"], "fact": memory.describe(fact_row)})
 
 
+# Words that make removing several facts at once clearly what they asked for.
+FORGET_SEVERAL = re.compile(r"\b(both|all|every|everything|them)\b", re.I)
+
+
 @tool
-def forget(memory_ids: list[int], config: RunnableConfig) -> str:
-    """Remove saved facts by id (ids are listed with the saved facts). Returns exactly what was removed."""
+def forget(memory_ids: list[int], state: Messages, config: RunnableConfig) -> str:
+    """Remove saved facts by id (ids are listed with the saved facts). Returns exactly what was removed.
+    If several facts could match what they said, list them and ask which instead of calling this."""
+    last = next((str(m.content) for m in reversed(state) if isinstance(m, HumanMessage)), "")
+    if len(set(memory_ids)) > 1 and not FORGET_SEVERAL.search(last):
+        return as_json({"removed": [], "reason": "Several facts match and they didn't say all of them. List them "
+                                                 "and ask which one (or both). Nothing was removed."})
     removed = memory.forget(turn(config).user, memory_ids)
     return as_json({"removed": [memory.describe(f) for f in removed]} if removed
                    else {"removed": [], "reason": "No saved fact with those ids."})
@@ -86,8 +95,10 @@ def forget(memory_ids: list[int], config: RunnableConfig) -> str:
 
 @tool
 def list_memory(config: RunnableConfig) -> str:
-    """Everything saved about the person (including dated facts that are not active today)."""
-    return as_json([{"id": f["id"], "fact": memory.describe(f)} for f in memory.facts(turn(config).user)])
+    """What is saved about the person: undated facts and dated ones that haven't ended (upcoming included).
+    Facts whose dates have passed are not shown."""
+    t = turn(config)
+    return as_json([{"id": f["id"], "fact": memory.describe(f)} for f in memory.current(t.user, t.day)])
 
 
 # --- today's data -------------------------------------------------------------

@@ -112,3 +112,53 @@ def test_a_late_or_no_time_rest_is_not_a_rest_day():
     assert (s.fraction, s.note) == (0.0, "easy run not done")              # the late check-in erases nothing
     coach_rest = {**plan("rest", 0, made=t(7), plan_id=3), "details_json": {"plan_source": "coach"}}
     assert score([coach_rest]).fraction == 1.0
+
+
+# --- inferred rest days ---------------------------------------------------------------------
+
+from modules.training.score import recovery_reason, rest_week  # noqa: E402
+
+
+def week(*pattern, recovery_today=None):
+    """Oldest first, 7 days ending today: "w" worked out, "r" rest, "c" recovery rest, "?" no data."""
+    days = [{"known": c != "?", "worked_out": c == "w", "recovery": "readiness was 60" if c == "c" else None}
+            for c in pattern]
+    days[-1]["recovery"] = recovery_today
+    return days
+
+
+def test_one_rest_day_within_the_budget_is_full_credit():
+    s = score_day([], [], RULES, rest=rest_week(week("w", "w", "w", "w", "w", "w", "r"), budget=1))
+    assert (s.fraction, s.note) == (1.0, "Rest day — you've trained 6 of the last 7 days")
+
+
+def test_a_second_rest_day_in_the_week_is_missed():
+    rest = rest_week(week("w", "r", "w", "w", "w", "w", "r"), budget=1)
+    s = score_day([], [], RULES, rest=rest)
+    assert (s.fraction, s.note) == (0.0, "no workout — 2 rest days in the last 7 (your week has 1)")
+    open_day = score_day([], [], RULES, day_over=False, rest=rest)
+    assert (open_day.note, open_day.next) == ("no workout yet", "a 20-minute walk (it counts as a workout)")
+
+
+def test_recovery_rests_never_use_the_budget():
+    rest = rest_week(week("w", "c", "w", "w", "w", "w", "r", recovery_today="readiness was 64"), budget=1)
+    s = score_day([], [], RULES, rest=rest)
+    assert (s.fraction, s.note) == (1.0, "Recovery rest — readiness was 64")
+    after_a_recovery = rest_week(week("w", "c", "w", "w", "w", "w", "r"), budget=1)   # the earlier one was recovery
+    assert score_day([], [], RULES, rest=after_a_recovery).fraction == 1.0
+
+
+def test_days_without_data_count_neither_way():
+    s = score_day([], [], RULES, rest=rest_week(week("?", "?", "?", "w", "w", "w", "r"), budget=1))
+    assert s.note == "Rest day — you've trained 3 of the last 4 days"
+
+
+def test_a_skipped_planned_session_is_still_missed_even_with_budget_left():
+    rest = rest_week(week("w", "w", "w", "w", "w", "w", "r"), budget=1)
+    assert score_day([plan()], [], RULES, rest=rest).fraction == 0.0
+
+
+def test_recovery_reason_low_readiness_or_a_context_fact():
+    assert recovery_reason(64, 70, []) == "readiness was 64"
+    assert recovery_reason(80, 70, ["Traveling, keep it light"]) == "you noted: Traveling, keep it light"
+    assert recovery_reason(80, 70, []) is None and recovery_reason(None, 70, []) is None
