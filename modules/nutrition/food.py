@@ -1,19 +1,26 @@
 """Food logging: rough LLM macro estimate + a row in food_log.
 
-Used by log_food.py and by Telegram messages (chat.py).
+Used by log_food.py and by chat messages. The person's saved diet facts go into the estimate prompt.
 """
 from datetime import datetime
 
-import db
-from labels import clock
-from llm import load_prompt, structured_call
-from schemas import FoodEstimate
+from core import db, memory
+from core.labels import clock
+from core.llm import load_prompt, structured_call
+from modules.nutrition.schemas import FoodEstimate
 
 
-def log_food(text: str, eaten_at: datetime) -> dict:
+def estimate(user, text: str, day) -> FoodEstimate:
+    facts = memory.for_prompt(user, day)
+    prompt = f"Entry: {text}"
+    if facts:
+        prompt += "\n\nSaved facts about this person:\n" + "\n".join(f"- {f}" for f in facts)
+    return structured_call("food", FoodEstimate, load_prompt("food"), prompt, user.id)
+
+
+def log_food(user, text: str, eaten_at: datetime) -> dict:
     """Estimate macros for `text`, save a new food_log row eaten at `eaten_at`, and return it."""
-    estimate = structured_call("food", FoodEstimate, load_prompt("food"), text)
-    return db.add_food(text, estimate.model_dump(), eaten_at)
+    return db.add_food(user.id, text, estimate(user, text, eaten_at.date()).model_dump(), eaten_at)
 
 
 def format_entry(row: dict, time_stated: bool = False) -> str:

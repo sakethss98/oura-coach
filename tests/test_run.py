@@ -1,11 +1,10 @@
 """run.py still works end to end on fixtures (LLM stubbed, temp demo databases)."""
-from datetime import date
 
 import pytest
 
-import db
+from core import db
 import run
-from config import DB_PATH
+from core.config import DB_PATH
 from tests.conftest import needs_fixtures
 
 pytestmark = needs_fixtures
@@ -14,7 +13,6 @@ pytestmark = needs_fixtures
 @pytest.fixture
 def temp_demo(tmp_path, monkeypatch, fake_llm, empty_calendar):
     monkeypatch.setattr(run, "DEMO_DB_PATH", tmp_path / "demo.db")
-    monkeypatch.setattr(run, "DEMO_CHECKPOINT_DB_PATH", tmp_path / "demo_checkpoints.db")
     yield tmp_path
     db.set_db_path(DB_PATH)
 
@@ -33,5 +31,5 @@ def test_simulate_hard_yesterday_triggers_override_and_cleans_up(temp_demo, fake
     assert any("back-to-back" in o["text"] for o in state["overrides"])
     assert state["final_plan"]["workout_type"] == "easy_run"
     assert "yesterday_hard" not in fake_llm.calls[-1][1]              # hidden from the LLM
-    all_sessions = db.sessions_between(date(2000, 1, 1), date(2100, 1, 1))
-    assert [s for s in all_sessions if s["source"] == "unplanned"] == []   # simulated session deleted
+    with db.connect() as conn:                                        # simulated workout deleted
+        assert conn.execute("SELECT COUNT(*) FROM manual_workouts").fetchone()[0] == 0

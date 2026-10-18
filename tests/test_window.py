@@ -1,7 +1,7 @@
 from datetime import datetime
 
-from calendar_client import plan_window
-from config import TZ
+from connectors.calendar_feed import plan_window
+from core.config import TZ
 
 
 def t(hour, minute=0):

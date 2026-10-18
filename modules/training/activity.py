@@ -1,17 +1,17 @@
-"""What I actually did on a day: Oura workouts merged with sessions I reported in chat.
+"""What I actually did on a day: Oura workouts merged with done plans and manual workouts.
 
 Pure functions. `rules` is the `activity` section of goals.yaml:
   hard_oura:   {oura_activity: {min_minutes: N}}   Oura workouts that count as a hard day
   walk_counts: {min_minutes: N, not_on_bands: [...]}   when a walk counts as a light workout
 
-A session and an Oura workout whose times overlap are the same activity and appear once.
-Only sessions marked done (or logged as unplanned) count; a plan I never confirmed does not,
+A plan (or manual workout) and an Oura workout whose times overlap are the same activity and appear once.
+Only plans marked done and manual workouts count; a plan I never confirmed does not,
 unless Oura recorded a matching workout around the planned time (`match_open_plans`).
 """
 from datetime import date, datetime, time, timedelta
 
-from config import TZ
-from labels import clock, oura_label, workout_label
+from core.config import TZ
+from core.labels import clock, oura_label, workout_label
 
 HARD_TYPES = {"HIIT", "long_run"}
 HARD_INTENSITY = 4
@@ -34,7 +34,7 @@ def _dt(value) -> datetime | None:
 
 
 def oura_items(workouts: list[dict], rules: dict) -> list[dict]:
-    """Oura workouts (from oura_client.daily_metrics) as activity items."""
+    """Oura workouts (from connectors.oura.daily_metrics) as activity items."""
     items = []
     for w in workouts:
         hard_rule = rules.get("hard_oura", {}).get(w["activity"])
@@ -54,7 +54,7 @@ def oura_items(workouts: list[dict], rules: dict) -> list[dict]:
 
 
 def session_items(sessions: list[dict], rules: dict) -> list[dict]:
-    """Done sessions (planned and marked done, or unplanned) as activity items."""
+    """Done plans as activity items."""
     run_rule = rules.get("hard_oura", {}).get(OURA_RUN)
     items = []
     for s in sessions:
@@ -79,6 +79,30 @@ def session_items(sessions: list[dict], rules: dict) -> list[dict]:
             "hard": (workout_type in HARD_TYPES or (plan.get("intensity") or 0) >= HARD_INTENSITY
                      or long_enough_run),
             "feeling": s["feeling"],
+        })
+    return items
+
+
+def manual_items(workouts: list[dict], rules: dict) -> list[dict]:
+    """Manual workouts (connectors.manual) as activity items; the same rules as a done plan."""
+    run_rule = rules.get("hard_oura", {}).get(OURA_RUN)
+    items = []
+    for w in workouts:
+        start, end = _dt(w["start"]), _dt(w["end"])
+        minutes = w["minutes"] if w["minutes"] is not None else round((end - start).total_seconds() / 60)
+        long_enough_run = w["workout_type"] in RUN_TYPES and run_rule is not None and minutes >= run_rule["min_minutes"]
+        items.append({
+            "source": "manual",
+            "manual_id": w["id"],
+            "activity": w["workout_type"],
+            "label": workout_label(w["workout_type"]),
+            "workout_type": w["workout_type"],
+            "start": start,
+            "end": end,
+            "minutes": minutes,
+            "is_walk": w["workout_type"] == "walk",
+            "hard": w["workout_type"] in HARD_TYPES or long_enough_run,
+            "feeling": w["feeling"],
         })
     return items
 

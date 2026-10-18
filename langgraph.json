@@ -1,7 +1,8 @@
 {
   "dependencies": ["."],
   "graphs": {
-    "coach": "./studio.py:graph"
+    "agent": "./studio.py:agent",
+    "planner": "./studio.py:planner"
   },
   "env": ".env"
 }

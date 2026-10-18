@@ -5,9 +5,10 @@ from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
-ROOT = Path(__file__).parent
+ROOT = Path(__file__).resolve().parent.parent   # repo root (this file is core/config.py)
 load_dotenv(ROOT / ".env")
 
+# The default time zone (user 1's). Per-user time zones live in user_settings (core/users.py).
 TZ = ZoneInfo("America/Chicago")
 DB_PATH = ROOT / "oura_coach.db"
 CHECKPOINT_DB_PATH = ROOT / "checkpoints.db"
@@ -33,6 +34,11 @@ def env(name: str) -> str:
     if not value:
         raise RuntimeError(f"Missing {name} in .env")
     return value
+
+
+def env_optional(name: str) -> str | None:
+    """An environment variable that may be missing (None)."""
+    return os.getenv(name) or None
 
 
 # Every value that must never appear in logs or chat replies.

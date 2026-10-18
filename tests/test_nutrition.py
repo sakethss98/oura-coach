@@ -1,10 +1,10 @@
 import json
 from datetime import datetime
 
-from baseline import food_totals
-from config import FIXTURES_DIR, TZ
-from nutrition import daily_targets, recent_food, remaining
-from oura_client import body_metrics
+from modules.training.baseline import food_totals
+from core.config import FIXTURES_DIR, TZ
+from modules.nutrition.targets import daily_targets, recent_food, remaining
+from connectors.oura import body_metrics
 from tests.conftest import needs_fixtures
 
 GOALS = {"weight_kg": None, "activity_factor": 1.5, "deficit_kcal": 500, "protein_g_per_kg": 2.0,

@@ -1,6 +1,6 @@
 from datetime import date
 
-from policy import deciding_override, food_cap, is_hard, policy_check, why_sentence
+from modules.training.policy import deciding_override, food_cap, is_hard, policy_check, why_sentence
 
 WEDNESDAY = date(2026, 10, 7)
 SATURDAY = date(2026, 10, 10)

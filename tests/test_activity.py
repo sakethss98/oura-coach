@@ -1,7 +1,7 @@
 from datetime import datetime
 
-from activity import counts_as_workout, hard_reason, merge_activity, oura_items, session_items, worked_out
-from config import TZ
+from modules.training.activity import counts_as_workout, hard_reason, merge_activity, oura_items, session_items, worked_out
+from core.config import TZ
 
 RULES = {
     "hard_oura": {"running": {"min_minutes": 60}},
@@ -98,7 +98,7 @@ def test_chat_walk_counts_except_on_push_days():
 
 # --- Oura completes an open plan (matching type, planned slot +/- 60 min) -------
 
-from activity import match_open_plans, next_split_day  # noqa: E402
+from modules.training.activity import match_open_plans, next_split_day  # noqa: E402
 
 
 def open_plan(workout_type, slot="06:30-07:00", completed=None, split_day=None):

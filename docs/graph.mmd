@@ -5,26 +5,20 @@ config:
 ---
 graph TD;
 	__start__([<p>__start__</p>]):::first
-	fetch_data(fetch_data)
-	compute_baseline(compute_baseline)
-	checkin(checkin)
-	gather_today(gather_today)
-	plan(plan)
-	rest_plan(rest_plan)
-	policy_check(policy_check)
-	log(log)
+	ingest(ingest)
+	greet(greet)
+	agent(agent)
+	tools(tools)
+	respond(respond)
 	__end__([<p>__end__</p>]):::last
-	__start__ --> fetch_data;
-	checkin --> gather_today;
-	compute_baseline -. &nbsp;ask check-in&nbsp; .-> checkin;
-	compute_baseline -. &nbsp;check-in known&nbsp; .-> gather_today;
-	fetch_data --> compute_baseline;
-	gather_today -. &nbsp;time left&nbsp; .-> plan;
-	gather_today -. &nbsp;no time left&nbsp; .-> rest_plan;
-	plan --> policy_check;
-	policy_check --> log;
-	rest_plan --> policy_check;
-	log --> __end__;
+	__start__ --> ingest;
+	agent -. &nbsp;__end__&nbsp; .-> respond;
+	agent -.-> tools;
+	greet --> respond;
+	ingest -. &nbsp;anything else&nbsp; .-> agent;
+	ingest -. &nbsp;greeting&nbsp; .-> greet;
+	tools --> agent;
+	respond --> __end__;
 	classDef default fill:#f2f0ff,line-height:1.2
 	classDef first fill-opacity:0
 	classDef last fill:#bfb6fc

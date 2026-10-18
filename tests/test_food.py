@@ -1,5 +1,5 @@
-from baseline import food_totals
-from policy import policy_check
+from modules.training.baseline import food_totals
+from modules.training.policy import policy_check
 from tests.test_policy import ctx, plan
 
 

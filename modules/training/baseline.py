@@ -2,7 +2,7 @@
 
 Pure functions only (no I/O), so they are easy to unit test.
 """
-from labels import PLAIN_METRIC
+from core.labels import PLAIN_METRIC
 
 # How far from the 7-day average counts as "above"/"below".
 # ("points", n) = absolute difference, ("percent", n) = relative difference.

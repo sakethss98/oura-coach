@@ -1,15 +1,16 @@
-"""Minimal Oura API v2 client with token refresh.
+"""Oura connector: API v2 client with token refresh, parsers, and `OuraSource` (read-only, cached).
 
 Oura refresh tokens are single-use, so the current token pair lives in SQLite
 and every refresh saves the new pair before doing anything else.
+Nothing here writes to Oura: Oura data can be read, never edited or deleted.
 """
 import json
 from datetime import date, datetime, time, timedelta
 
 import httpx
 
-import db
-from config import FIXTURES_DIR, TZ, env
+from core import db
+from core.config import FIXTURES_DIR, TZ, env
 
 API_BASE = "https://api.ouraring.com/v2/usercollection"
 TOKEN_URL = "https://api.ouraring.com/oauth/token"
@@ -145,7 +146,7 @@ def _by_day(records: list[dict]) -> dict[str, dict]:
     return {r["day"]: r for r in records}
 
 
-def daily_metrics(raw: dict, day: date) -> dict:
+def daily_metrics(raw: dict, day: date, tz=TZ) -> dict:
     """One flat dict of the metrics we care about for a single day.
 
     Missing data comes back as None. Durations from Oura are in seconds.
@@ -162,7 +163,7 @@ def daily_metrics(raw: dict, day: date) -> dict:
 
     hr_samples = [
         s for s in raw["heartrate"]["data"]
-        if datetime.fromisoformat(s["timestamp"]).astimezone(TZ).date() == day
+        if datetime.fromisoformat(s["timestamp"]).astimezone(tz).date() == day
     ]
     bpms = [s["bpm"] for s in hr_samples]
     # Workout samples are much denser than awake/rest ones, so leave them out of the average.
@@ -175,7 +176,7 @@ def daily_metrics(raw: dict, day: date) -> dict:
         return round(seconds / 60) if seconds is not None else None
 
     def local(iso: str) -> datetime:
-        return datetime.fromisoformat(iso).astimezone(TZ)
+        return datetime.fromisoformat(iso).astimezone(tz)
 
     return {
         "day": key,
@@ -206,3 +207,71 @@ def daily_metrics(raw: dict, day: date) -> dict:
             for w in raw["workout"]["data"] if w["day"] == key
         ],
     }
+
+
+# --- OuraSource: the HealthSource the rest of the app uses --------------------
+
+CACHE_TTL = timedelta(minutes=10)
+HISTORY_DAYS = 7    # the baseline window: fetch day-7 .. day
+
+
+class OuraSource:
+    """Oura as a HealthSource. Fetches the 7 days before `day` through `day` in one go and caches
+    the raw responses per user for 10 minutes (`oura_cache`), so several questions in a row cost one fetch.
+
+    `use_fixtures` reads fixtures/ instead of the API (written to the same cache, so code that only
+    reads the cache, like core.day, sees the fixtures too). User 1 is the only user with Oura tokens today.
+    """
+
+    def __init__(self, use_fixtures: bool = False):
+        self.use_fixtures = use_fixtures
+
+    def raw(self, user, day: date, refresh: bool = False, now: datetime | None = None,
+            allow_stale: bool = False) -> dict:
+        """Raw responses covering day-7 .. day. A fresh cache that covers them is reused unless `refresh`;
+        with `allow_stale` any cached copy that covers them is reused (no fetch unless there is none)."""
+        now = now or datetime.now(user.tz)
+        start, end = day - timedelta(days=HISTORY_DAYS), day + timedelta(days=1)
+        cache = db.get_oura_cache(user.id)
+        covers = cache is not None and cache["start_date"] <= start and cache["end_date"] >= end
+        if not refresh and covers and (allow_stale or now - cache["fetched_at"] < CACHE_TTL):
+            return cache["raw"]
+        if self.use_fixtures:
+            raw = load_fixtures()
+        else:
+            if user.id != 1:
+                raise OuraAuthError("Only user 1 has Oura tokens (per-user Oura login comes with onboarding).")
+            raw = OuraClient().fetch_range(start, end)
+        db.save_oura_cache(user.id, start, end, raw, now)
+        return raw
+
+    def refresh(self, user, day: date, now: datetime | None = None) -> bool:
+        """Fetch again now. True if Oura returned anything different from the cached data."""
+        before = db.get_oura_cache(user.id)
+        after = self.raw(user, day, refresh=True, now=now)
+        return before is None or before["raw"] != after
+
+    # HealthSource methods (core/connectors/base.py)
+
+    def metrics(self, user, day: date) -> dict:
+        return daily_metrics(self.raw(user, day), day, user.tz)
+
+    def readiness(self, user, day: date) -> dict:
+        m = self.metrics(user, day)
+        return {"score": m["readiness_score"], "temperature_deviation": m["temperature_deviation"]}
+
+    def sleep(self, user, day: date) -> dict:
+        m = self.metrics(user, day)
+        return {"score": m["sleep_score"], "hours": m["sleep_hours"], "hrv_ms": m["hrv_ms"],
+                "resting_hr": m["resting_hr"]}
+
+    def workouts(self, user, day: date) -> list[dict]:
+        return [{"source": "oura", **w} for w in self.metrics(user, day)["workouts"]]
+
+    def activity(self, user, day: date) -> dict:
+        m = self.metrics(user, day)
+        return {k: m[k] for k in ("activity_score", "steps", "active_calories", "high_activity_min",
+                                  "medium_activity_min")}
+
+    def body(self, user, day: date) -> dict:
+        return body_metrics(self.raw(user, day))

@@ -1,33 +1,32 @@
-"""The coach graph, one thread per check-in:
+"""The training planner graph: one run turns a known check-in into a workout for right now.
 
-    fetch_data -> compute_baseline -> [checkin (interrupt)] -> gather_today -> plan | rest_plan
-               -> policy_check -> log
+    fetch_data -> compute_baseline -> gather_today -> plan | rest_plan -> policy_check -> log
 
-Two conditional edges: `checkin` is skipped when the check-in is already known (/plan, run.py),
-and `rest_plan` (no LLM call) replaces `plan` when there is no free time left today.
+One conditional edge: `rest_plan` (no LLM call) replaces `plan` when there is no free time left today.
+There is no interrupt: the check-in question and its answer live in the `plans` table and the
+agent's chat session (core/agent.py), and the planner only runs once the answer is known.
 
 Each node returns a partial state update. Math, times and rules are deterministic code;
-the LLM is used only in `plan`. `now` is always passed in (input or resume value), never
-read inside a node, so a run is reproducible.
+the LLM is used only in `plan`. `now` is always passed in, never read inside a node,
+so a run is reproducible.
 """
 import json
 from datetime import date, datetime
 from typing import TypedDict
 
 from langgraph.graph import END, START, StateGraph
-from langgraph.types import Command, interrupt
 
-import db
-from baseline import compute_baseline, effective_band
-from config import TZ
-from llm import load_prompt, structured_call
-from nutrition import fallback_before, fallback_meal
-from policy import body_could_do_more, policy_check, why_sentence
-from schemas import Plan
-from today import day_context, fetch_oura, fetch_schedule, fixtures_now, load_goals
+from core import db, users
+from core.day import day_of
+from modules.training.baseline import compute_baseline, effective_band
+from core.llm import load_prompt, structured_call
+from modules.nutrition.targets import fallback_before, fallback_meal
+from modules.training.policy import body_could_do_more, policy_check, why_sentence
+from modules.training.schemas import Plan
+from today import day_context, fetch_oura, fetch_schedule, fixtures_now
 
 CHECKIN_QUESTION = (
-    "How's your energy (1-5) and soreness (1-5)? Anything else I should know?\n"
+    "How's your energy (1-5) and soreness (0-5)? Anything else I should know?\n"
     "Reply like: 4 2 slept badly   (or skip)"
 )
 REST_QUESTION = "Want a 10-minute stretch you can do anytime?"
@@ -36,13 +35,14 @@ EXERCISE_COUNT = range(5, 7)   # a strength plan lists 5-6 exercises
 
 class CoachState(TypedDict, total=False):
     # input
+    user_id: int                  # whose plan (default: user 1, e.g. from Studio)
     use_fixtures: bool
     thread_id: str
-    now: str                      # ISO local time the plan is for (updated by the check-in answer)
-    checkin: dict | None          # {"energy", "soreness", "note", "label"}; preset = checkin node skipped
+    now: str                      # ISO local time the plan is for
+    checkin: dict                 # {"energy", "soreness", "note", "label"} (None values = not answered)
+    plan_id: int                  # the plans row to fill (an answered check-in); new row if missing
     hide_history_from_llm: bool   # demo: LLM does not see earlier activity, so policy_check must catch it
     # fetch_data
-    session_id: int
     day: str                      # YYYY-MM-DD
     oura: dict                    # today / history / body / workouts_by_day (today.fetch_oura)
     schedule: dict                # busy / all_day / free (times as "HH:MM") / source
@@ -74,19 +74,25 @@ def new_thread_id(now: datetime) -> str:
 
 def fetch_data(state: CoachState) -> dict:
     fixtures = state.get("use_fixtures", False)
+    user = users.get(state.get("user_id") or users.DEFAULT_USER_ID)
     now = datetime.fromisoformat(state["now"]) if state.get("now") else (
-        fixtures_now() if fixtures else datetime.now(TZ))
-    day = now.date()
+        fixtures_now(tz=user.tz) if fixtures else datetime.now(user.tz))
+    # Fetch first: it fills the Oura cache that day_of reads to find where today starts.
+    oura = fetch_oura(user, now.date(), fixtures, now)
+    day = day_of(user, now)
+    if day != now.date():
+        oura = fetch_oura(user, day, fixtures, now)
     thread_id = state.get("thread_id") or new_thread_id(now)
-    session_id = db.start_session(day, thread_id, now)  # abandons any older pending check-in
+    plan_id = state.get("plan_id") or db.start_plan(user.id, day, thread_id, now)
     return {
+        "user_id": user.id,
         "now": now.isoformat(timespec="minutes"),
         "thread_id": thread_id,
-        "session_id": session_id,
+        "plan_id": plan_id,
         "day": day.isoformat(),
-        "oura": fetch_oura(day, fixtures),
-        "schedule": fetch_schedule(day, fixtures),
-        "goals": load_goals(),
+        "oura": oura,
+        "schedule": fetch_schedule(user, day, fixtures),
+        "goals": user.goals(),
     }
 
 
@@ -96,25 +102,11 @@ def compute_baseline_node(state: CoachState) -> dict:
                                          state["goals"]["schedule"]["readiness_floor"])}
 
 
-def checkin(state: CoachState) -> dict:
-    """Ask energy/soreness. No side effects: LangGraph re-runs this node on resume."""
-    readiness = state["oura"]["today"]["readiness_score"]
-    answer = interrupt({
-        "question": CHECKIN_QUESTION,
-        "summary": f"🔋 Readiness {readiness}" if readiness is not None else "🔋 Readiness: no data yet",
-    })
-    return {
-        "checkin": {"energy": answer.get("energy"), "soreness": answer.get("soreness"),
-                    "note": answer.get("note"), "label": answer.get("label", "just now")},
-        "now": answer.get("now") or state["now"],
-    }
-
-
 def gather_today(state: CoachState) -> dict:
     band = effective_band(state["baseline"]["band"], state["checkin"], state["goals"]["checkin"])
     now = datetime.fromisoformat(state["now"])
-    context = day_context(date.fromisoformat(state["day"]), now, state["oura"], state["schedule"],
-                          band["band"], state["goals"])
+    context = day_context(users.get(state["user_id"]), date.fromisoformat(state["day"]), now, state["oura"],
+                          state["schedule"], band["band"], state["goals"])
     return {"band": band, "context": context}
 
 
@@ -130,7 +122,7 @@ def plan(state: CoachState) -> dict:
         "body": state["oura"]["body"],
         "schedule": {"busy": state["schedule"]["busy"], "all_day": state["schedule"]["all_day"]},
         "goals": state["goals"],
-        "context_notes": c["context_notes"],
+        "saved_memory": c["saved_memory"],
         "checkin": {k: v for k, v in state["checkin"].items() if k != "label"},
         "activity_today": c["activity_today"],
         "worked_out_today": c["worked_out_today"],
@@ -149,7 +141,7 @@ def plan(state: CoachState) -> dict:
         context["yesterday_hard"] = c["yesterday_hard"]
         context["hard_days_prev6"] = c["hard_days_prev6"]
     user = json.dumps(context, indent=2, default=str)  # default=str: goals.yaml dates
-    result = structured_call("plan", Plan, load_prompt("plan"), user)
+    result = structured_call("plan", Plan, load_prompt("plan"), user, state["user_id"])
     return {"llm_plan": result.model_dump(), "plan_source": "coach"}
 
 
@@ -237,9 +229,10 @@ def log(state: CoachState) -> dict:
         "plan_source": state.get("plan_source", "coach"),
         "overrides": state["overrides"],
     }
-    db.finish_session(state["session_id"], state["checkin"], state["final_plan"], state["llm_plan"],
-                      state["overrides"], details)
+    db.finish_plan(state["plan_id"], state["checkin"], state["final_plan"], state["llm_plan"],
+                   state["overrides"], details)
     db.upsert_daily_log(
+        state["user_id"],
         date.fromisoformat(state["day"]),
         metrics_json={"today": state["oura"]["today"], "baseline": state["baseline"]},
         food_targets_json=c["targets"],
@@ -247,19 +240,14 @@ def log(state: CoachState) -> dict:
     return {}
 
 
-def after_baseline(state: CoachState) -> str:
-    return "check-in known" if state.get("checkin") is not None else "ask check-in"
-
-
 def after_gather(state: CoachState) -> str:
     return "time left" if state["context"]["window"] else "no time left"
 
 
-def build_graph(checkpointer):
+def build_graph(checkpointer=None):
     graph = StateGraph(CoachState)
     graph.add_node("fetch_data", fetch_data)
     graph.add_node("compute_baseline", compute_baseline_node)
-    graph.add_node("checkin", checkin)
     graph.add_node("gather_today", gather_today)
     graph.add_node("plan", plan)
     graph.add_node("rest_plan", rest_plan)
@@ -267,9 +255,7 @@ def build_graph(checkpointer):
     graph.add_node("log", log)
     graph.add_edge(START, "fetch_data")
     graph.add_edge("fetch_data", "compute_baseline")
-    graph.add_conditional_edges("compute_baseline", after_baseline,
-                                {"ask check-in": "checkin", "check-in known": "gather_today"})
-    graph.add_edge("checkin", "gather_today")
+    graph.add_edge("compute_baseline", "gather_today")
     graph.add_conditional_edges("gather_today", after_gather, {"time left": "plan", "no time left": "rest_plan"})
     graph.add_edge("plan", "policy_check")
     graph.add_edge("rest_plan", "policy_check")
@@ -278,24 +264,11 @@ def build_graph(checkpointer):
     return graph.compile(checkpointer=checkpointer)
 
 
-# --- helpers for callers (chat.py, run.py) -----------------------------------
+# --- helper for callers (core/agent.py, run.py) ------------------------------
 
-def start_run(app, now: datetime, use_fixtures: bool, checkin: dict | None = None,
-              hide_history_from_llm: bool = False) -> dict:
-    """Start a check-in. Returns {"thread_id", "question"} if it waits for an answer, else the final state."""
-    thread_id = new_thread_id(now)
-    state = app.invoke(
-        {"use_fixtures": use_fixtures, "thread_id": thread_id, "now": now.isoformat(timespec="minutes"),
-         "checkin": checkin, "hide_history_from_llm": hide_history_from_llm},
-        config={"configurable": {"thread_id": thread_id}},
-    )
-    if "__interrupt__" in state:
-        payload = state["__interrupt__"][0].value
-        return {"thread_id": thread_id, "question": payload["question"], "summary": payload["summary"]}
-    return state
-
-
-def resume_run(app, thread_id: str, answer: dict, now: datetime) -> dict:
-    """Answer a waiting check-in; returns the final state."""
-    return app.invoke(Command(resume={**answer, "now": now.isoformat(timespec="minutes")}),
-                      config={"configurable": {"thread_id": thread_id}})
+def run_plan(app, user, now: datetime, use_fixtures: bool, checkin: dict, plan_id: int | None = None,
+             hide_history_from_llm: bool = False) -> dict:
+    """Plan a workout for `now` from a known check-in; returns the final state."""
+    return app.invoke({"user_id": user.id, "use_fixtures": use_fixtures, "thread_id": new_thread_id(now),
+                       "now": now.isoformat(timespec="minutes"), "checkin": checkin, "plan_id": plan_id,
+                       "hide_history_from_llm": hide_history_from_llm})

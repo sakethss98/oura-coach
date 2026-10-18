@@ -3,18 +3,17 @@
 Usage: python run.py [--fixtures [--simulate-hard-yesterday]] [--at HH:MM] [--energy N] [--soreness N]
 Food is logged separately with: python log_food.py "what you had"
 
-The graph pauses for the check-in; run.py answers it straight away with --energy/--soreness.
+The check-in comes from --energy/--soreness (in chat, the agent asks it first).
 """
 import argparse
-import sqlite3
 from datetime import datetime, time, timedelta
 
-from langgraph.checkpoint.sqlite import SqliteSaver
-
-import db
-from chat import format_activity, format_food_today, format_remaining, format_targets
-from config import CHECKPOINT_DB_PATH, DEMO_CHECKPOINT_DB_PATH, DEMO_DB_PATH, OPENAI_MODEL, TZ
-from graph import build_graph, resume_run, start_run
+from connectors.manual import ManualSource
+from core import db, users
+from modules.nutrition.messages import format_food_today, format_remaining, format_targets
+from modules.training.messages import format_activity
+from core.config import DEMO_DB_PATH, OPENAI_MODEL, TZ
+from modules.training.planner import build_graph, run_plan
 from today import fixtures_now
 
 LABELS = {
@@ -29,18 +28,18 @@ def fmt(value) -> str:
     return "-" if value is None else str(value)
 
 
-def simulate_hard_yesterday(now: datetime) -> int:
-    """Demo only: save a done HIIT session for the day before the fixtures' "today" in demo.db.
+def simulate_hard_yesterday(user, now: datetime) -> int:
+    """Demo only: save a manual HIIT workout for the day before the fixtures' "today" in demo.db.
 
     main() deletes it after the run, so later demo runs are not affected.
     """
     yesterday = now.date() - timedelta(days=1)
     start = datetime.combine(yesterday, time(6, 30), TZ)
-    session = db.add_unplanned(yesterday, "HIIT", 40, start, start + timedelta(minutes=40),
-                               "simulated by --simulate-hard-yesterday", start + timedelta(minutes=40))
-    print(f"[demo] Saved a simulated done HIIT session for {yesterday} in demo.db.")
+    workout = ManualSource().add_workout(user, "HIIT", start, start + timedelta(minutes=40), 40,
+                                         "simulated by --simulate-hard-yesterday")
+    print(f"[demo] Saved a simulated HIIT workout for {yesterday} in demo.db.")
     print("[demo] The LLM will not be shown earlier activity, so policy_check has to enforce the rule.")
-    return session["id"]
+    return workout["id"]
 
 
 def print_report(state: dict, demo: bool) -> None:
@@ -78,8 +77,8 @@ def print_report(state: dict, demo: bool) -> None:
     print(format_food_today(c["food_totals"]["today"]))
     print(format_targets(c["targets"]))
     print(format_remaining(c["remaining"]))
-    if c["context_notes"]:
-        print("Context: " + "; ".join(c["context_notes"]))
+    if c["saved_memory"]:
+        print("Remembered: " + "; ".join(c["saved_memory"]))
 
     split = f" ({final['split_day']})" if final.get("split_day") else ""
     print(f"\nWorkout:   {final['workout_type']}{split}  (intensity {final['intensity']}/5)"
@@ -116,7 +115,7 @@ def main(argv: list[str] | None = None) -> dict:
     parser.add_argument("--at", type=time.fromisoformat, metavar="HH:MM",
                         help="plan as if it were this time today (default: now)")
     parser.add_argument("--energy", type=int, choices=range(1, 6), help="1 (drained) to 5 (great)")
-    parser.add_argument("--soreness", type=int, choices=range(1, 6), help="1 (none) to 5 (very sore)")
+    parser.add_argument("--soreness", type=int, choices=range(0, 6), help="0 (none) to 5 (very sore)")
     parser.add_argument("--simulate-hard-yesterday", action="store_true",
                         help="demo only (needs --fixtures): log a done HIIT session for yesterday in demo.db")
     args = parser.parse_args(argv)
@@ -131,19 +130,15 @@ def main(argv: list[str] | None = None) -> dict:
         if args.at:
             now = datetime.combine(now.date(), args.at, TZ)
     db.init_db()
-    simulated = simulate_hard_yesterday(now) if args.simulate_hard_yesterday else None
-    checkpoint_path = DEMO_CHECKPOINT_DB_PATH if args.fixtures else CHECKPOINT_DB_PATH
-
-    conn = sqlite3.connect(checkpoint_path, check_same_thread=False)
+    user = users.default()
+    simulated = simulate_hard_yesterday(user, now) if args.simulate_hard_yesterday else None
+    answer = {"energy": args.energy, "soreness": args.soreness, "note": None, "label": "from the command line"}
     try:
-        app = build_graph(SqliteSaver(conn))
-        waiting = start_run(app, now, args.fixtures, hide_history_from_llm=args.simulate_hard_yesterday)
-        answer = {"energy": args.energy, "soreness": args.soreness, "note": None, "label": "from the command line"}
-        state = resume_run(app, waiting["thread_id"], answer, now)
+        state = run_plan(build_graph(), user, now, args.fixtures, answer,
+                         hide_history_from_llm=args.simulate_hard_yesterday)
     finally:
-        conn.close()
         if simulated:
-            db.delete_session(simulated)
+            db.delete_manual_workout(simulated)
     print_report(state, demo=args.fixtures)
     return state
 

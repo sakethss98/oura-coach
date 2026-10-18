@@ -5,11 +5,12 @@ from datetime import date, datetime, time
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
-import db
-from chat import Coach, format_plan, format_why
-from config import TZ
-from graph import build_graph, finalize
-from tests.conftest import action, needs_fixtures
+from core import db
+from core.coach import Coach
+from core.config import TZ
+from modules.training.messages import format_plan, format_why
+from modules.training.planner import finalize
+from tests.conftest import call, needs_fixtures, say
 from today import fixtures_now
 
 TARGETS = {"targets": {"calories": 2218, "protein_g": 126, "carbs_g": 290, "fat_g": 62, "fiber_g": 31},
@@ -158,30 +159,30 @@ def test_plan_messages_are_plain():
 
 @pytest.fixture
 def coach(temp_db, fake_llm, empty_calendar):
-    return Coach(build_graph(InMemorySaver()), use_fixtures=True)
+    return Coach(InMemorySaver(), use_fixtures=True)
 
 
 @needs_fixtures
-def test_why_today_and_confirmations_are_plain(coach, fake_llm):
+def test_tool_texts_and_confirmations_are_plain(coach, chat_model, user):
+    """Every code-built text the agent sends (question, plan, why) and the confirmations stay plain."""
     at = lambda h, m=0: fixtures_now(time(h, m))  # noqa: E731
-    coach.handle_command("checkin", "", at(7))
-    assert_plain(coach.handle_text("2 3 tired", at(7, 1)))
-    assert_plain(coach.handle_command("why", "", at(7, 2)))
-
-    fake_llm.routes["had poha"] = [action("food", text="poha")]
-    fake_llm.routes["done, felt great"] = [action("workout_done", refers_to_plan=True, feeling="great")]
-    fake_llm.routes["traveling Thu-Sat"] = [action("context_note", text="traveling", start_text="Thu",
-                                                   end_text="Sat")]
-    fake_llm.routes["went for a 30 min walk"] = [action("workout_done", refers_to_plan=False, workout_type="walk",
-                                                        duration_min=30)]
-    for message in fake_llm.routes:
-        assert_plain(coach.handle_text(message, at(9)))
-    assert_plain(coach.handle_command("today", "", at(10)))
-    assert_plain(coach.handle_command("undo", "", at(10)))
+    turns = [
+        ("want to work out", [call("start_checkin"), say("")]),
+        ("2 3 tired", [call("submit_checkin", energy=2, soreness=3, comment="tired"), say("")]),
+        ("why?", [call("explain_plan"), say("")]),
+        ("had poha", [call("log_food", text="poha", time_text=None), say("Logged poha: about 450 kcal, 20 g protein.")]),
+        ("done, felt great", [call("mark_done", feeling="great", time_text=None), say("Nice work, walk marked done.")]),
+        ("went for a 30 min walk at 6", [call("add_manual_workout", workout_type="walk", minutes=30,
+                                              start_time_text="at 6", feeling=None), say("Added a 30-minute walk at 6am.")]),
+    ]
+    for i, (message, script) in enumerate(turns):
+        chat_model.script.extend(script)
+        assert_plain(coach.handle_text(user, message, at(7, i)))
+    assert chat_model.script == []
 
 
 def test_why_with_old_string_overrides_still_works(temp_db):
-    session_id = db.start_session(date(2026, 10, 7), "t", datetime(2026, 10, 7, 7, tzinfo=TZ))
-    db.finish_session(session_id, {}, plan(), plan(), ["Old plain override text."], {})
-    text = format_why(db.get_session(session_id))
+    session_id = db.start_plan(1, date(2026, 10, 7), "t", datetime(2026, 10, 7, 7, tzinfo=TZ))
+    db.finish_plan(session_id, {}, plan(), plan(), ["Old plain override text."], {})
+    text = format_why(db.get_plan(session_id))
     assert "Old plain override text." in text and "Check-in: skipped" in text

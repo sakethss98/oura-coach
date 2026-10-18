@@ -1,7 +1,7 @@
 from datetime import date, datetime
 
-from config import TZ
-from timeparse import parse_clock_time, resolve_dates
+from core.config import TZ
+from core.timeparse import parse_clock_time, resolve_dates
 
 WEDNESDAY = date(2026, 10, 7)
 

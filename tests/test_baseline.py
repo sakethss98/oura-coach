@@ -1,4 +1,4 @@
-from baseline import compare, compute_baseline, metric_status, readiness_band
+from modules.training.baseline import compare, compute_baseline, metric_status, readiness_band
 
 
 def day(readiness=None, hrv=None, rhr=None, sleep=None):
@@ -84,7 +84,7 @@ def test_band_recover_when_two_metrics_worse():
 
 # --- effective band: the check-in lowers (never raises) the Oura band ----------
 
-from baseline import effective_band  # noqa: E402
+from modules.training.baseline import effective_band  # noqa: E402
 
 CHECKIN_RULES = {"recover_if": {"energy_at_most": 2, "soreness_at_least": 4},
                  "down_one_if": {"energy_at_most": 3, "soreness_at_least": 3}}

@@ -5,7 +5,7 @@ and returns the final plan plus a list of overrides. Each override is
 {"rule", "text", "plain", "changes_type"}: `text` is technical (run.py, logs),
 `plain` is a coach sentence for chat.
 """
-from labels import workout_label
+from core.labels import workout_label
 
 HARD_TYPES = {"HIIT", "long_run"}
 HARD_INTENSITY = 4          # intensity >= this also counts as a hard day

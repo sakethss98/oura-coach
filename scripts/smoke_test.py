@@ -14,9 +14,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import icalendar  # noqa: E402
 
-from calendar_client import CALENDAR_FIXTURE, fetch_calendar_bytes, schedule_for  # noqa: E402
-from config import FIXTURES_DIR, TZ  # noqa: E402
-from oura_client import OuraClient, daily_metrics  # noqa: E402
+from connectors.calendar_feed import CALENDAR_FIXTURE, fetch_calendar_bytes, schedule_for  # noqa: E402
+from core.config import FIXTURES_DIR, TZ  # noqa: E402
+from connectors.oura import OuraClient, daily_metrics  # noqa: E402
 
 
 def save_fixture(name: str, payload: dict) -> None:

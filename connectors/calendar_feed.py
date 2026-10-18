@@ -10,7 +10,7 @@ import httpx
 import icalendar
 import recurring_ical_events
 
-from config import DAY_END_HOUR, DAY_START_HOUR, FIXTURES_DIR, MIN_SLOT_MINUTES, TZ, env
+from core.config import DAY_END_HOUR, DAY_START_HOUR, FIXTURES_DIR, MIN_SLOT_MINUTES, TZ, env
 
 CALENDAR_FIXTURE = FIXTURES_DIR / "calendar.ics"
 

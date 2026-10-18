@@ -5,9 +5,9 @@ Usage: python log_food.py [--demo] [--at HH:MM] "2 eggs, toast, black coffee"
 import argparse
 from datetime import datetime, time
 
-import db
-from config import DEMO_DB_PATH, TZ
-from food import format_entry, log_food
+from core import db, users
+from core.config import DEMO_DB_PATH, TZ
+from modules.nutrition.food import format_entry, log_food
 from today import fixtures_now
 
 
@@ -26,7 +26,7 @@ def main() -> None:
         now = datetime.now(TZ)
         eaten_at = datetime.combine(now.date(), args.at, TZ) if args.at else now
     db.init_db()
-    print(format_entry(log_food(args.text, eaten_at), time_stated=args.at is not None))
+    print(format_entry(log_food(users.default(), args.text, eaten_at), time_stated=args.at is not None))
 
 
 if __name__ == "__main__":
