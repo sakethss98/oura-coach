@@ -218,6 +218,7 @@ def plan(state: CoachState) -> dict:
             "totals": c["food_totals"],
             "targets": c["targets"],
             "remaining_today": c["remaining"],
+            "recent_meal_ideas": c["recent_meal_ideas"],
         },
     }
     if state.get("request"):
@@ -234,6 +235,13 @@ def plan(state: CoachState) -> dict:
     else:
         llm_plan = {**result, "blocks": []}                     # parts come only from what they asked for
     return {"llm_plan": llm_plan, "llm_types": types_of(result), "plan_source": "coach"}
+
+
+def _meal(state: CoachState) -> str:
+    """A code-picked meal for the diet and what's left today, not one of the recent ideas."""
+    c = state["context"]
+    return fallback_meal(c["remaining"], state["goals"]["nutrition"]["diet"], date.fromisoformat(state["day"]),
+                         c["recent_meal_ideas"])
 
 
 def suggested_plan(state: CoachState) -> dict:
@@ -263,7 +271,7 @@ def rest_plan(state: CoachState) -> dict:
                      "so no plan was generated.")
     return {
         "llm_plan": {**CODE_PLAN, "workout_type": "rest", "intensity": 1, "time_slot": "none", "duration_min": 0,
-                     "why": why, "reasoning": reasoning, "food_after": fallback_meal(c["remaining"]),
+                     "why": why, "reasoning": reasoning, "food_after": _meal(state),
                      "follow_up": follow_up},
         "plan_source": "code",
     }
@@ -295,7 +303,7 @@ def finalize(final: dict, llm_plan: dict, overrides: list[dict], state: CoachSta
     final["food_source"] = "code" if type_changed or state.get("plan_source") == "code" else "coach"
     if type_changed:
         final["food_before"] = fallback_before(final["workout_type"])
-        final["food_after"] = fallback_meal(c["remaining"])
+        final["food_after"] = _meal(state)
     if final["workout_type"] == "rest":
         final["food_before"] = ""
         if type_changed or not final["follow_up"]:

@@ -98,6 +98,13 @@ def sync_oura_completions(user, day: date, oura_workouts_by_day: dict, rules: di
     return done
 
 
+MEAL_IDEA_DAYS = 5     # a dish suggested in the last 5 days (today included) is not suggested again
+
+
+def recent_meal_ideas(user, day: date) -> list[str]:
+    return [s["dish"] for s in db.meal_suggestions_since(user.id, day - timedelta(days=MEAL_IDEA_DAYS - 1))]
+
+
 def food_on(user, day: date) -> list[dict]:
     """Food eaten on `day` (Oura-defined day bounds)."""
     return db.food_between(user.id, *day_bounds(user, day))
@@ -136,6 +143,7 @@ def day_context(user, day: date, now: datetime, oura: dict, schedule: dict, band
         "remaining": remaining(targets["targets"], totals["today"]),
         "recent_food": recent_food(food_today, now),
         "saved_memory": memory.for_prompt(user, day),
+        "recent_meal_ideas": recent_meal_ideas(user, day),
         "first_plan_today": db.count_planned(user.id, day) == 0,
         "next_split_day": activity.next_split_day(db.done_strength_plans(user.id), goals["strength"]["split"]),
         "plans_today": db.plans_between(user.id, day, day),

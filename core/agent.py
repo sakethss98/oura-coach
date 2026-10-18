@@ -32,7 +32,7 @@ HISTORY_HUMAN_TURNS = 5      # the agent sees the conversation from the 5th-last
 # Tools that change something. When one of them ran next to a tool whose text is sent as is,
 # the agent's own line (e.g. "Logged 2 eggs.", or the answer to the rest of "done, what should I eat?")
 # is sent too, after the code-built text.
-WRITE_TOOLS = {"log_food", "remove_food", "remember", "forget", "add_manual_workout", "mark_done"}
+WRITE_TOOLS = {"log_food", "edit_food", "remove_food", "remember", "forget", "add_manual_workout", "mark_done"}
 
 
 def make_model():
@@ -152,8 +152,14 @@ def respond(state: AgentState, config) -> dict:
     parts = []
     if verbatim:
         parts += verbatim                       # code-built text first, exactly as built
+        built_by = {m.name for m in turn_messages if isinstance(m, ToolMessage) and isinstance(m.artifact, dict)
+                    and m.artifact.get("verbatim")}
+        writes = tools_called & WRITE_TOOLS
+        # The agent's line confirms a write or answers the rest; not needed when code text did both
+        # ("done, what should I eat?" = mark_done's confirmation + suggest_meal's ideas).
+        covered = writes <= built_by and bool(built_by - WRITE_TOOLS)
         repeats = any(draft and draft in v for v in verbatim)
-        if draft and tools_called & WRITE_TOOLS and not repeats:
+        if draft and writes and not covered and not repeats:
             parts.append(_within_rules(draft, tools_called, t))
     elif draft:
         parts.append(_within_rules(draft, tools_called, t))

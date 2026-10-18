@@ -9,4 +9,5 @@ Rules:
 - est_caffeine_mg: 0 if there is no caffeine. A regular cup of brewed coffee is about 95 mg.
 - alcohol_drinks: US standard drinks (12 oz beer, 5 oz wine, 1.5 oz spirits = 1). 0 if there is no alcohol.
 - Supplements usually have near-zero macros; estimate only what is plausible (e.g. a protein scoop has protein).
+- You may get numbers they stated (e.g. calories = 30, carbs_g = 9). Use them exactly and keep the other fields consistent with them (a 30 kcal drink has almost no protein).
 - confidence: "high" when items and portions are clear, "med" when portions are guessed, "low" when the text is vague.

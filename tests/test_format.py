@@ -106,10 +106,11 @@ def test_strength_message_golden():
 
 # --- finalize: every chat field matches the final workout ---------------------
 
-def graph_state(llm_plan, overrides=(), split="Pull", oura_band="push"):
-    return {"context": {"remaining": REMAINING, "next_split_day": split},
+def graph_state(llm_plan, overrides=(), split="Pull", oura_band="push", recent=()):
+    return {"context": {"remaining": REMAINING, "next_split_day": split, "recent_meal_ideas": list(recent)},
             "baseline": {"band": {"band": oura_band}}, "oura": {"today": {"readiness_score": 82}},
-            "goals": {"schedule": {"readiness_floor": 70}}, "plan_source": "coach", "llm_plan": llm_plan}
+            "goals": {"schedule": {"readiness_floor": 70}, "nutrition": {"diet": "vegetarian"}},
+            "day": "2026-10-07", "plan_source": "coach", "llm_plan": llm_plan}
 
 
 def test_strength_gets_split_day_from_code_and_keeps_5_to_6_exercises():
@@ -132,9 +133,13 @@ def test_override_from_hiit_to_walk_replaces_food_lines_with_code_picks():
                 "so just something light.", "changes_type": True}
     final = finalize({**llm, "workout_type": "walk", "intensity": 2}, llm, [override], graph_state(llm))
     assert final["food_source"] == "code"
-    assert final["food_before"] == "" and final["food_after"] == "Paneer bhurji with 2 rotis and a bowl of dal"
+    assert final["food_before"] == ""
+    assert final["food_after"] == "Paneer bhurji (150 g, about 1 katori) with 2 chapatis and a bowl of dal"
     assert final["why"].startswith("Your body could handle more, but you already trained today")
     assert final["exercises"] == [] and final["split_day"] is None
+    again = finalize({**llm, "workout_type": "walk", "intensity": 2}, llm, [override],
+                     graph_state(llm, recent=["Paneer bhurji wrap"]))         # suggested lately: the next one
+    assert again["food_after"].startswith("Soya chunk curry")
 
 
 def test_override_to_rest_adds_a_question():

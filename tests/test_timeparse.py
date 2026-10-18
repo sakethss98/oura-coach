@@ -58,3 +58,28 @@ def test_no_dates_means_today():
 def test_unreadable_dates():
     assert resolve_dates("someday", None, WEDNESDAY) is None
     assert resolve_dates("Oct 40", None, WEDNESDAY) is None
+
+
+# --- a day that has happened (list_food) -----------------------------------------------
+
+import pytest  # noqa: E402
+
+from core.timeparse import resolve_past_day  # noqa: E402
+
+WEDNESDAY_OCT_7 = date(2026, 10, 7)
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("today", date(2026, 10, 7)), ("yesterday", date(2026, 10, 6)), ("3 days ago", date(2026, 10, 4)),
+    ("Monday", date(2026, 10, 5)), ("last Monday", date(2026, 10, 5)), ("Wednesday", date(2026, 10, 7)),
+    ("last Wednesday", date(2026, 9, 30)), ("Oct 5", date(2026, 10, 5)), ("5 Oct", date(2026, 10, 5)),
+    ("10/5", date(2026, 10, 5)), ("Oct 10", date(2025, 10, 10)), ("2026-10-01", date(2026, 10, 1)),
+    (None, date(2026, 10, 7)),
+])
+def test_past_days_look_back(text, expected):
+    assert resolve_past_day(text, WEDNESDAY_OCT_7) == expected
+
+
+@pytest.mark.parametrize("text", ["tomorrow", "2026-11-01", "sometime", "next Friday"])
+def test_future_or_unreadable_days_give_none(text):
+    assert resolve_past_day(text, WEDNESDAY_OCT_7) is None

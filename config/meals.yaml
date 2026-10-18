@@ -1,0 +1,20 @@
+# Code-picked meals: used when no coach text fits (no time left today, code changed the workout, or the
+# meal idea call failed). Keyed by goals.yaml nutrition.diet, then by how much protein is still left today.
+# Picked in rotation by date, skipping dishes suggested in the last 5 days (modules/nutrition/targets.py).
+vegetarian:
+  high_protein:          # 40+ g protein left today
+    - "Paneer bhurji (150 g, about 1 katori) with 2 chapatis and a bowl of dal"
+    - "Soya chunk curry (50 g dry, 1 katori cooked) with 1 cup rice and curd"
+    - "Egg bhurji (3 eggs) with 2 chapatis and sautéed spinach"
+    - "Chana masala (1.5 katori, 250 g) with 2 chapatis and a cup of curd"
+    - "Moong dal chilla (3 chillas) stuffed with 100 g paneer, with mint chutney"
+    - "Tofu palak (200 g tofu, 1.5 katori) with 1 cup rice"
+  medium_protein:        # 15-40 g left
+    - "Rajma (1 katori, 200 g) with 1 cup rice and a cup of curd"
+    - "Dal tadka (1 katori) with 2 chapatis and a vegetable sabzi"
+    - "Vegetable besan chilla (2 chillas) with a cup of curd"
+    - "Masoor dal (1 katori) with 1 cup jeera rice and salad"
+  light:                 # under 15 g left
+    - "Moong dal khichdi (1.5 katori, 250 g) with curd"
+    - "Vegetable upma (1 bowl, 200 g) with a cup of buttermilk"
+    - "Curd rice (1 bowl, 250 g) with cucumber"

@@ -40,3 +40,8 @@ def test_enforce_drops_bad_sentences_and_trims():
     long = enforce(" ".join(["word"] * 100), set())
     assert len(long.split()) <= MAX_WORDS
     assert enforce("a\nb\nc\nd\ne", set()) == "a\nb\nc"
+
+
+def test_a_tacked_on_anything_else_is_a_violation():
+    assert violations("Logged 2 eggs. Anything else?", {"log_food"}) == ["uses an extra offer ('anything else')"]
+    assert enforce("Logged 2 eggs. Anything else?", {"log_food"}) == "Logged 2 eggs."

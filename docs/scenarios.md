@@ -83,3 +83,9 @@ These came from live use on 2026-10-17.
 - **7c** Same as 7, "yes" 20 min later in a new chat session → still answered (the question lasts 2 h, not one session).
 - **7d** Same as 7, "yes" more than 2 h later → the question expired: no plan, nothing planned or scored. Must not: turn the suggestion into a plan.
 - **10c** "done, what should I eat now?" → the code-built confirmation exactly as built, then the answer on its own line.
+
+## Added during Phase 4 (2026-10-18)
+
+- **5b** "dinner ideas" on two days in a row → no dish repeats (same main dish counts). Must not: the same dish both days.
+- **4c** Two pizza entries, "remove the pizza", and the model tries to remove both → refused in code, it asks; "both" → both removed.
+- **3b** "I don't think it's 60g protein" (a doubt, no number) → the estimate is redone with it; protein is not recorded as their number.

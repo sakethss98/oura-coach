@@ -1,4 +1,5 @@
-"""Daily food targets and what is left of them. Pure functions; the LLM never does this math.
+"""Daily food targets, what is left of them, one meal's share, and code-picked meals.
+Pure functions (meals are read from config/meals.yaml); the LLM never does this math.
 
 Targets come from Oura personal_info (age, weight, height, sex) and the coefficients in
 the `nutrition` section of goals.yaml:
@@ -9,7 +10,12 @@ the `nutrition` section of goals.yaml:
   carbs    = the calories left after protein (4 kcal/g) and fat
   fiber    = fiber_g_per_1000kcal per 1000 kcal
 """
-from datetime import datetime
+import re
+from datetime import date, datetime
+
+import yaml
+
+from core.config import ROOT
 
 TARGET_KEYS = ["calories", "protein_g", "carbs_g", "fat_g", "fiber_g"]
 SEX_OFFSET = {"male": 5, "female": -161}
@@ -68,10 +74,10 @@ def recent_food(entries: list[dict], now: datetime) -> list[dict]:
 
 
 # Code-picked food lines, used when there is no LLM text that fits the final plan
-# (no time left today, or code changed the workout the LLM wrote food for).
-HIGH_PROTEIN_MEAL = "Paneer bhurji with 2 rotis and a bowl of dal"
-MEDIUM_PROTEIN_MEAL = "Rajma or chole with rice and a bowl of curd"
-LIGHT_MEAL = "Moong dal khichdi with curd"
+# (no time left today, or code changed the workout the LLM wrote food for). Meals: config/meals.yaml.
+MEALS_PATH = ROOT / "config" / "meals.yaml"
+PROTEIN_LEVELS = [(40, "high_protein"), (15, "medium_protein"), (0, "light")]
+MEAL_SHARE_MAX = 0.35      # one meal is at most this share of the day's targets
 BEFORE = {
     "HIIT": "A banana or 2 dates about 30 minutes before",
     "easy_run": "A banana or a small bowl of poha if you're hungry",
@@ -80,14 +86,40 @@ BEFORE = {
 }
 
 
-def fallback_meal(remaining: dict | None) -> str:
-    """One vegetarian Indian meal, picked by how much protein is still left today."""
+def dish_key(dish: str) -> str:
+    """The words that name a dish ("Paneer bhurji (150 g) with 2 chapatis" -> "paneer bhurji"), so the same
+    dish with other sides or portions counts as a repeat."""
+    words = [w for w in re.sub(r"\(.*?\)", " ", dish.lower()).replace("-", " ").split() if w.isalpha()]
+    words = [w for w in words if w not in {"a", "an", "the", "of", "quick", "simple", "easy", "spicy", "light"}]
+    cut = next((i for i, w in enumerate(words) if w in {"with", "and", "plus", "on", "in"}), len(words))
+    return " ".join(words[:min(cut, 2)] or words[:2])
+
+
+def fallback_meal(remaining: dict | None, diet: str = "vegetarian", day: date | None = None,
+                  avoid: list[str] = ()) -> str:
+    """One meal for the diet, picked by how much protein is still left today; rotates by date and skips
+    dishes suggested recently, so the same dish doesn't come back every day."""
+    meals = yaml.safe_load(MEALS_PATH.read_text())
+    by_level = meals.get(diet) or meals["vegetarian"]
     protein_left = remaining["protein_g"] if remaining else 0
-    if protein_left >= 40:
-        return HIGH_PROTEIN_MEAL
-    if protein_left >= 15:
-        return MEDIUM_PROTEIN_MEAL
-    return LIGHT_MEAL
+    level = next(name for floor, name in PROTEIN_LEVELS if protein_left >= floor)
+    options = by_level[level]
+    start = day.toordinal() % len(options) if day else 0
+    rotated = options[start:] + options[:start]
+    recent = {dish_key(a) for a in avoid}
+    return next((m for m in rotated if dish_key(m) not in recent), rotated[0])
+
+
+def meal_budget(targets: dict | None, left: dict | None, now: datetime) -> dict | None:
+    """How big one meal should be: what is left today split over the meals still to come (3 before
+    11:00, 2 before 17:00, then 1), at most 35% of the daily target (a normal meal, even when little was
+    logged), at least 200 kcal."""
+    if targets is None or left is None:
+        return None
+    meals_left = 3 if now.hour < 11 else 2 if now.hour < 17 else 1
+    return {"calories": max(min(left["calories"] / meals_left, MEAL_SHARE_MAX * targets["calories"]), 200),
+            "protein_g": max(min(left["protein_g"] / meals_left, MEAL_SHARE_MAX * targets["protein_g"]), 10)} | {
+        "meals_left_today": meals_left}
 
 
 def fallback_before(workout_type: str) -> str:

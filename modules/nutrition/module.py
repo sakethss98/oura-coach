@@ -1,12 +1,15 @@
 """The nutrition module: food logging with rough estimates, edits, removals, meal ideas, daily targets.
 
-Tools: modules/nutrition/tools.py (edit_food and suggest_meal arrive in Phase 4). Score: Phase 4.
+Tools: modules/nutrition/tools.py. Score: modules/nutrition/score.py.
 """
-from datetime import date
+from datetime import date, datetime
 
+from connectors.health import Health
 from core import db
 from core.day import day_bounds
 from modules.base import NudgeSpec, ScoreComponent
+from modules.nutrition.score import is_after_cutoff, load_rules, score_day
+from modules.nutrition.targets import daily_targets
 from modules.training.baseline import food_totals
 
 
@@ -36,10 +39,16 @@ class NutritionModule:
         return [NudgeSpec("log_meal", "no food logged for 6 hours during the day",
                           "Had anything to eat? Tell me and I'll log it.")]
 
-    def score(self, user, day: date) -> ScoreComponent:
-        raise NotImplementedError("Nutrition score arrives in M3.2 Phase 4")
+    def score(self, user, day: date, now: datetime | None = None) -> ScoreComponent:
+        """Protein, calories and meals against the day's targets (modules/nutrition/score.py)."""
+        body = (self.health or Health()).bundle(user, day, now=now, allow_stale=True)["body"]
+        targets = daily_targets(body, user.goals()["nutrition"])["targets"]
+        entries = db.food_between(user.id, *day_bounds(user, day))
+        return score_day(entries, targets, load_rules(), user.goal_rigor, is_after_cutoff(user, day, now))
 
     def help_lines(self) -> list[str]:
-        return ['"had poha and chai at 8": I log it with a rough estimate',
-                '"remove the pizza": I remove an entry (I ask which one if it is unclear)',
+        return ['"had poha and chai at 8", "a 30 cal soda": I log it (your numbers win over my estimate)',
+                '"correction, it was 9g carbs", "edit that": I fix the entry, never add a second one',
+                '"remove the pizza", "what did I eat on Oct 10?": remove or list entries',
+                '"dinner ideas, I have dal and spinach": meal ideas with portions, then the recipe',
                 '"what\'s left to eat today?": what is left of your daily targets']

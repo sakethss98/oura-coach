@@ -2,7 +2,7 @@
 
 Tools: modules/training/tools.py. Score: modules/training/score.py.
 """
-from datetime import date
+from datetime import date, datetime
 
 from connectors.health import Health
 from core import db
@@ -37,6 +37,12 @@ class TrainingModule:
             r = consult["requested_json"]
             lines.append(f"Waiting for yes or no (confirm_override), asked at {clock(r['asked_at'][11:16])}: "
                          f"{r['question']!r}")
+        expired = None if consult else db.expired_consult(user.id, day)
+        if expired:
+            r = expired["requested_json"]
+            lines.append(f"Their workout question from {clock(r['asked_at'][11:16])} ({r['question'].splitlines()[-1]!r}) "
+                         "expired unanswered after 2 hours; nothing was planned. A bare yes/no now: confirm_override "
+                         "(it tells them).")
         latest = db.latest_planned(user.id, day)
         if latest:
             plan = latest["plan_json"] or {}
@@ -53,7 +59,7 @@ class TrainingModule:
                 NudgeSpec("post_workout", "Oura records a workout matching today's plan",
                           "Nice work, I saw your workout. How did it feel?")]
 
-    def score(self, user, day: date) -> ScoreComponent:
+    def score(self, user, day: date, now: datetime | None = None) -> ScoreComponent:
         """Did the day's plan happen (modules/training/score.py)? Marks what Oura recorded first."""
         import today   # the shared day view (root module); imported here so loading the module stays light
         rules = user.goals()["activity"]

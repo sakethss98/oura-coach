@@ -1,0 +1,18 @@
+# The daily score, computed in code. Phase 4 adds the nutrition part; Phase 5 adds the template weights,
+# recovery and movement.
+nutrition:
+  parts:                         # share of the nutrition component (adds up to 1)
+    protein: 0.4                 # linear: 0 g = 0, the daily target = full
+    calories: 0.4                # full inside the band around the target, sloping to 0
+    meals: 0.2                   # entries logged as meals or snacks; this many = full
+  meals_for_full: 3
+  calories_full_pct:             # within this % of the target = full, by goal_rigor
+    light: 15
+    moderate: 10
+    intense: 5
+  calories_zero_pct:             # this far off the target (either way) = 0, by goal_rigor
+    light: 40
+    moderate: 30
+    intense: 20
+  calorie_floor: 0.6             # after the cutoff, under 0.6 x target = calories part 0 (never reward under-eating)
+  no_food_scores_zero: true      # nothing logged = 0, with the plain note "not logged"

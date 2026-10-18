@@ -115,3 +115,44 @@ def resolve_dates(start_text: str | None, end_text: str | None, today: date) -> 
     if end is None or end < start:
         return None
     return start, end
+
+
+_DAYS_AGO = re.compile(r"^(\d{1,2}|a|one|two|three|four|five|six|seven)\s+days?\s+ago$")
+_NUMBER_WORDS = {"a": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7}
+
+
+def resolve_past_day(text: str | None, today: date) -> date | None:
+    """A phrase about a day that has happened -> that date (looking back, never forward).
+
+    "today", "yesterday", "3 days ago"; a weekday = its most recent occurrence ("Monday" on a Monday =
+    today), "last Monday" = the one before that; "Oct 10", "10 Oct", "10/10" and ISO dates = this year,
+    or last year if that date is still ahead. None if it can't be read or lies in the future.
+    """
+    text = (text or "today").strip().lower().rstrip(".")
+    if text in {"today", "tonight", "now", "this morning"}:
+        return today
+    if text in {"yesterday", "last night"}:
+        return today - timedelta(days=1)
+    ago = _DAYS_AGO.match(text)
+    if ago:
+        n = _NUMBER_WORDS.get(ago[1]) or int(ago[1])
+        return today - timedelta(days=n)
+    words = text.split()
+    if words and words[-1] in WEEKDAYS and len(words) <= 2 and words[0] in {words[-1], "last", "on", "this"}:
+        back = (today.weekday() - WEEKDAYS[words[-1]]) % 7
+        if words[0] == "last" and back == 0:
+            back = 7
+        return today - timedelta(days=back)
+    try:
+        found = date.fromisoformat(text)
+    except ValueError:
+        if words[0] == "next" or text == "tomorrow":
+            return None
+        found = _resolve_day(text, today, today)            # "Oct 10": the next one on or after today...
+        if found is None:
+            return None
+        if found > today:                                    # ...so step back to the one that has happened
+            found = found.replace(year=found.year - 1)
+            if found > today:
+                return None
+    return found if found <= today else None

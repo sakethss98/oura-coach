@@ -5,7 +5,7 @@ Deterministic rules live inside each module as plain code; the agent only gets t
 the modules the user has enabled.
 """
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from typing import Protocol
 
 
@@ -41,8 +41,8 @@ class Module(Protocol):
     def nudges(self) -> list[NudgeSpec]:
         """Declared only; nothing fires them in M3.2."""
 
-    def score(self, user, day: date) -> ScoreComponent:
-        """This module's deterministic contribution to the day's score."""
+    def score(self, user, day: date, now: datetime | None = None) -> ScoreComponent:
+        """This module's deterministic contribution to the day's score (`now` None = the day is over)."""
 
     def help_lines(self) -> list[str]:
         """Plain-language lines for /help."""

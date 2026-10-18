@@ -817,6 +817,22 @@ def delete_food(user_id: int, entry_ids: list[int]) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+# --- meal ideas (so suggestions don't repeat) -------------------------------
+
+def add_meal_suggestions(user_id: int, day: date, dishes: list[str]) -> None:
+    with connect() as conn:
+        conn.executemany("INSERT INTO meal_suggestions (user_id, day, dish, created_at) VALUES (?, ?, ?, ?)",
+                         [(user_id, day.isoformat(), d, _stamp()) for d in dishes])
+
+
+def meal_suggestions_since(user_id: int, since: date) -> list[dict]:
+    """Dishes suggested on `since` or later, oldest first."""
+    with connect() as conn:
+        rows = conn.execute("SELECT day, dish FROM meal_suggestions WHERE user_id = ? AND day >= ? ORDER BY id",
+                            (user_id, since.isoformat())).fetchall()
+    return [dict(r) for r in rows]
+
+
 def last_food(user_id: int) -> dict | None:
     """The most recently saved entry."""
     with connect() as conn:

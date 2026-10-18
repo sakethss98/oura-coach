@@ -1,7 +1,8 @@
 """Rules for every free-form reply (plan messages are built by code and exempt). Pure functions.
 
 - At most 3 lines and about 60 words.
-- Plain words: no internal terms (band labels, intensity numbers, snake_case, "window", "null").
+- Plain words: no internal terms (band labels, intensity numbers, snake_case, "window", "null"),
+  and no tacked-on "anything else?" (answer what was asked, then stop).
 - Never claim an action no tool performed this turn. Only first-person claims count
   ("I logged", "I've updated", "I'll resend"), never the bare word ("logged 2 eggs" is fine
   after log_food ran, and "you logged" is not a claim at all).
@@ -18,6 +19,8 @@ BANNED = [
     (re.compile(r"\bwindow\b", re.I), "the word 'window'"),
     (re.compile(r"\bnull\b", re.I), "the word 'null'"),
     (re.compile(r"\b[a-z]+_[a-z0-9_]+\b"), "a snake_case term"),
+    (re.compile(r"\banything else\b", re.I), "an extra offer ('anything else')"),
+    (re.compile(r"\boverrides?\b", re.I), "the word 'override'"),
 ]
 
 _I = r"\bI(?:['’]ve|\s+have)?\s+(?:just\s+|already\s+|now\s+)?"

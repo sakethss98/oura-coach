@@ -6,10 +6,12 @@ model and check that it understands; run them with -s to see the transcripts.
 Plan and food estimates are stubbed in both (fake_llm), so numbers are predictable; live tests read
 the check-in answer with the real model (real_checkin), since that is understanding too.
 Scenario ids and wording: docs/scenarios.md. Phase 2: 1, 8, 9, 11, 12 and the correction guard.
-Phase 3 (training): 6, 7, 7b, 7c, 10, 10b, 21-25. The rest come with Phases 4-6.
+Phase 3 (training): 6, 7, 7b, 7c, 7d, 10, 10b, 10c, 21-25. Phase 4 (food): 2, 3, 4, 4b, 5, 5b, 15-20.
+The rest come with Phases 5-6.
 """
+import json
 import os
-from datetime import time
+from datetime import time, timedelta
 
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
@@ -21,11 +23,14 @@ from core.agent import EXPIRED_CHECKIN
 from core.coach import VOICE, Coach
 from core.reply_rules import violations
 from core.llm import structured_call
+from modules.nutrition import food, meals
+from modules.nutrition.targets import dish_key
 from modules.training import checkin
+from modules.training.baseline import food_totals
 from modules.training.module import TrainingModule
 from modules.training.planner import LATE_FOLLOW_UP, LATE_WHY
 from modules.training.tools import NO_OURA_MATCH
-from tests.conftest import call, needs_fixtures, parsed_checkin, say, tool_results
+from tests.conftest import call, ideas, needs_fixtures, parsed_checkin, say, tool_results
 from today import fixtures_now, food_on
 
 pytestmark = needs_fixtures
@@ -194,18 +199,6 @@ def test_12_still_broken_after_the_rewrite_is_trimmed_by_code(coach, user, chat_
 
 # --- correction guard (until edit_food exists) ----------------------------------------------
 
-def test_a_correction_never_becomes_a_second_entry(coach, user, chat_model):
-    chat = Chat(coach, user, chat_model)
-    chat.send("poppi strawberry lemon soda small can", 10, 0, [
-        call("log_food", text="poppi strawberry lemon soda small can", time_text=None),
-        say("Logged poppi soda: about 450 kcal, 20 g protein.")])
-    reply = chat.send("correction on that it is 3g fiber and 9g carbs. 30cal", 10, 2, [
-        call("log_food", text="poppi soda, 3g fiber, 9g carbs, 30 cal", time_text=None),   # the model slips
-        say("I can't edit entries yet. Want me to remove it and log it again with your numbers?")])
-    assert len(food_today(user)) == 1                                   # the tool refused
-    assert "remove it and log it again" in reply
-
-
 def test_remove_food_asks_when_several_entries_match(coach, user, chat_model):
     for hour in (13, 15):
         db.add_food(1, "2 slices of pizza", {"est_calories": 500, "est_protein_g": 20}, at(hour))
@@ -220,6 +213,167 @@ def test_remove_food_asks_when_several_entries_match(coach, user, chat_model):
 
     chat.send("the 3pm one", 16, 1, [call("remove_food", entry_ids=[second]), say("Removed the 3pm pizza.")])
     assert [f["id"] for f in food_today(user)] == [first]
+
+
+# --- food (Phase 4) ----------------------------------------------------------------------------
+
+POPPI = "poppi strawberry lemon soda small can"
+
+
+def rows_now():
+    with db.connect() as conn:
+        return [dict(r) for r in conn.execute("SELECT * FROM food_log ORDER BY id")]
+
+
+def test_2_a_correction_updates_the_same_row_with_their_numbers(coach, user, chat_model):
+    chat = Chat(coach, user, chat_model)
+    chat.send(POPPI, 10, 0, [call("log_food", text=POPPI, time_text=None),
+                             say("Logged poppi soda: about 450 kcal, 20 g protein.")])
+    [logged] = rows_now()
+    reply = chat.send("correction on that it is 3g fiber and 9g carbs. 30cal", 10, 2, [
+        call("log_food", text="poppi soda, 3g fiber, 9g carbs, 30 cal", time_text=None),   # the model slips
+        call("edit_food", entry_id=logged["id"], fiber_g=3, carbs_g=9, calories=30),
+        say("Updated poppi soda: 30 kcal, 9 g carbs, 3 g fiber.")])
+    [row] = rows_now()                                                            # refused, then edited in place
+    assert row["id"] == logged["id"] and (row["est_fiber_g"], row["est_carbs_g"], row["est_calories"]) == (3, 9, 30)
+    assert set(json.loads(row["user_numbers_json"])) == {"est_fiber_g", "est_carbs_g", "est_calories"}
+    assert food_totals(food_today(user))["calories"] == 30
+    assert facts(user) == ["Vegetarian, eats eggs", "Prefers Indian food"]        # must not: a note
+    assert last_tool_result(chat_model, "log_food")["saved"] is False
+    assert_rules(reply, {"edit_food"})
+
+
+def test_3_a_new_description_re_estimates_the_same_row(coach, user, chat_model, fake_llm):
+    fake_llm.food_queue = [{"est_protein_g": 60, "est_calories": 1500}, {"est_protein_g": 38, "est_calories": 1350}]
+    chat = Chat(coach, user, chat_model)
+    chat.send("I ate 5 slices of pizza at 3pm", 16, 0, [
+        call("log_food", text="5 slices of pizza", time_text="3pm"), say("Logged 5 slices of pizza at 3pm.")])
+    [logged] = rows_now()
+    assert logged["timestamp"].startswith("2026-10-07T15:00")
+    text = "it was cheese pizza with olives and onions, I don't think it's 60g protein. Edit that"
+    reply = chat.send(text, 16, 5, [
+        call("edit_food", entry_id=logged["id"], new_text="5 slices of cheese pizza with olives and onions",
+             feedback="I don't think it's 60g protein"),
+        say("Updated: 5 slices of cheese pizza with olives and onions, about 1350 kcal, 38 g protein.")])
+    [row] = rows_now()
+    assert row["id"] == logged["id"] and row["raw_text"] == "5 slices of cheese pizza with olives and onions"
+    assert row["est_protein_g"] == 38 and row["timestamp"] == logged["timestamp"]
+    assert "60g protein" in fake_llm.calls[-1][1]                                 # their doubt reached the estimate
+    assert_rules(reply, {"edit_food"})
+
+
+def test_4_remove_the_pizza_names_it_and_updates_totals(coach, user, chat_model):
+    db.add_food(1, "chai", {"est_calories": 90, "est_protein_g": 3}, at(8))
+    pizza = db.add_food(1, "2 slices of pizza", {"est_calories": 500, "est_protein_g": 20}, at(13))
+    reply = Chat(coach, user, chat_model).send("remove the pizza", 16, 0, [
+        call("list_food", day="today"), call("remove_food", entry_ids=[pizza["id"]]),
+        say("Removed 2 slices of pizza (about 500 kcal).")])
+    assert [f["raw_text"] for f in food_today(user)] == ["chai"]
+    assert food_totals(food_today(user))["calories"] == 90
+    assert "pizza" in reply and last_tool_result(chat_model, "remove_food")["removed"][0]["text"] == "2 slices of pizza"
+    assert_rules(reply, {"remove_food"})
+
+
+def test_4b_two_pizzas_and_the_model_guesses_nothing_is_removed(coach, user, chat_model):
+    for hour in (13, 15):
+        db.add_food(1, "2 slices of pizza", {"est_calories": 500, "est_protein_g": 20}, at(hour))
+    first, second = (f["id"] for f in food_today(user))
+    chat = Chat(coach, user, chat_model)
+    reply = chat.send("remove the pizza", 16, 0, [
+        call("list_food", day="today"), call("remove_food", entry_ids=[first, second]),   # the model guesses
+        say("You have two pizza entries, at 1pm and 3pm. Which one should I remove?")])
+    assert len(food_today(user)) == 2 and "Which one" in reply
+    assert "didn't say which" in last_tool_result(chat_model, "remove_food")["reason"]
+    chat.send("both", 16, 1, [call("remove_food", entry_ids=[first, second]), say("Removed both pizza entries.")])
+    assert food_today(user) == []
+
+
+def test_5_ideas_then_the_second_one_then_higher_protein_is_the_same_dish(coach, user, chat_model):
+    chat = Chat(coach, user, chat_model)
+    ideas_reply = chat.send("simple dinner ideas, I have dal, rice and spinach", 19, 0, [
+        call("suggest_meal", meal="dinner", ingredients=["dal", "rice", "spinach"], constraints="simple"), say("")])
+    lines = ideas_reply.splitlines()
+    assert lines[0].startswith("For dinner, about ") and lines[1].startswith("1. Dal palak with jeera rice")
+    assert lines[3].startswith("2. Spinach moong dal khichdi") and "g (" in lines[4]   # grams + household measure
+    dish = last_tool_result(chat_model, "suggest_meal")["options_in_order"][1]
+    recipe = chat.send("give me the second one", 19, 1, [call("meal_recipe", dish=dish, change=None,
+                                                              ingredients=["dal", "rice", "spinach"]), say("")])
+    assert recipe.startswith("Spinach moong dal khichdi · about")
+    revised = chat.send("make it higher protein", 19, 2, [call("meal_recipe", dish=dish, change="higher protein",
+                                                               ingredients=None), say("")])
+    assert revised.startswith("Spinach moong dal khichdi (higher protein)")
+    assert plans_today(user) == [] and db.pending_plan(1) is None                  # must not: a workout plan
+
+
+def test_5b_dinner_ideas_on_two_days_in_a_row_are_different_dishes(coach, user, chat_model, fake_llm):
+    today_ = at(19).date()
+    fake_llm.meal_queue = [ideas("Rajma chawal", "Dal palak with jeera rice"),     # day 1
+                           ideas("Rajma chawal bowl", "Dal palak with rice"),       # day 2: both repeats
+                           ideas("Chana masala with chapatis", "Vegetable pulao with raita")]
+    chat = Chat(coach, user, chat_model)
+    coach._fixture_day = today_ - timedelta(days=1)                               # yesterday evening
+    chat.send("dinner ideas", 19, 0, [call("suggest_meal", meal="dinner", ingredients=None, constraints=None), say("")])
+    first = last_tool_result(chat_model, "suggest_meal")["options_in_order"]
+    coach._fixture_day = today_
+    reply = chat.send("dinner ideas", 19, 0, [call("suggest_meal", meal="dinner", ingredients=None, constraints=None),
+                                              say("")])
+    second = last_tool_result(chat_model, "suggest_meal")["options_in_order"]
+    assert {dish_key(d) for d in first}.isdisjoint(dish_key(d) for d in second)
+    assert second == ["Chana masala with chapatis", "Vegetable pulao with raita"] and "Chana masala" in reply
+
+
+def test_15_16_a_question_or_a_plan_to_eat_is_not_logged(coach, user, chat_model):
+    chat = Chat(coach, user, chat_model)
+    answer = chat.send("should I have a Celsius right now?", 15, 0, [
+        say("A Celsius has about 200 mg caffeine. Fine now, but skip it after 2pm if you want to sleep well.")])
+    later = chat.send("I'm going to have pizza later", 15, 1, [say("Enjoy! Tell me once you've had it.")])
+    assert rows_now() == []
+    assert_rules(answer) and assert_rules(later)
+
+
+def test_17_two_times_in_one_message_are_two_rows(coach, user, chat_model):
+    Chat(coach, user, chat_model).send("coffee at 8 and a banana at 10:30", 11, 0, [
+        call("log_food", text="coffee", time_text="at 8"), call("log_food", text="a banana", time_text="10:30"),
+        say("Logged coffee at 8am and a banana at 10:30am.")])
+    assert [(f["raw_text"], f["timestamp"][11:16]) for f in food_today(user)] == [("coffee", "08:00"),
+                                                                                  ("a banana", "10:30")]
+
+
+def test_18_eaten_together_is_one_row(coach, user, chat_model):
+    Chat(coach, user, chat_model).send("2 eggs, toast and coffee for breakfast", 8, 0, [
+        call("log_food", text="2 eggs, toast and coffee", time_text=None), say("Logged breakfast.")])
+    assert [f["raw_text"] for f in food_today(user)] == ["2 eggs, toast and coffee"]
+
+
+def test_19_food_at_0050_before_the_nights_sleep_counts_for_the_day_before(coach, user, chat_model, patch_oura):
+    patch_oura(bedtime="01:30")                                                   # went to bed at 1:30am
+    Health(use_fixtures=True).oura.raw(user, at(12).date(), now=at(0, 40))        # Oura synced (cached sleep)
+    Chat(coach, user, chat_model).send("had a bowl of maggi", 0, 50, [
+        call("log_food", text="a bowl of maggi", time_text=None), say("Logged a bowl of maggi.")])
+    today_ = at(12).date()
+    assert [f["raw_text"] for f in food_on(user, today_ - timedelta(days=1))] == ["a bowl of maggi"]
+    assert food_on(user, today_) == []
+
+
+def test_20_delete_the_last_two_removes_only_the_two_newest(coach, user, chat_model):
+    oldest, middle, newest = (db.add_food(1, t, {"est_calories": 100}, at(h)) for t, h in
+                              (("poha", 8), ("chai", 11), ("biscuits", 15)))
+    Chat(coach, user, chat_model).send("delete the last two", 16, 0, [
+        call("list_food", day="today"), call("remove_food", entry_ids=[middle["id"], newest["id"]]),
+        say("Removed chai and biscuits.")])
+    assert [f["id"] for f in food_today(user)] == [oldest["id"]]
+
+
+def test_list_food_reads_any_past_day(coach, user, chat_model):
+    db.add_food(1, "rajma chawal", {"est_calories": 600, "est_protein_g": 20}, at(13) - timedelta(days=2))
+    chat = Chat(coach, user, chat_model)
+    chat.send("what did I eat on Monday?", 9, 0, [call("list_food", day="Monday"), say("Rajma chawal, about 600 kcal.")])
+    result = last_tool_result(chat_model, "list_food")
+    assert result["day"] == "Monday Oct 5" and [e["text"] for e in result["entries"]] == ["rajma chawal"]
+    chat.send("and on Oct 6?", 9, 1, [call("list_food", day="Oct 6"), say("Nothing logged on Oct 6.")])
+    assert last_tool_result(chat_model, "list_food")["entries"] == []
+    chat.send("and next Friday?", 9, 2, [call("list_food", day="next Friday"), say("That hasn't happened yet.")])
+    assert "Could not read the day" in last_tool_result(chat_model, "list_food")["reason"]
 
 
 # --- training (Phase 3): helpers --------------------------------------------------------------
@@ -312,6 +466,7 @@ def test_7d_an_unanswered_question_expires_with_no_plan_and_no_score(coach, user
     with db.connect() as conn:
         assert [r[0] for r in conn.execute("SELECT status FROM plans")] == ["expired"]
     assert plans_today(user) == [] and "plan" not in fake_llm.kinds()
+    assert "expired unanswered" in system_seen(chat_model)                        # the agent is told
     training = TrainingModule(Health(use_fixtures=True)).score(user, at(12).date())
     assert (training.fraction, training.note) == (0.0, "no workout")                  # same as never asking
 
@@ -363,6 +518,18 @@ def test_10c_done_and_a_question_keeps_the_confirmation_then_answers(coach, user
     confirmation = "Marked done: HIIT 12:12–1:03pm (from Oura). How did it feel?"
     assert reply == f"{confirmation}\n\n{answer}"                                     # code text first, as built
     assert_rules(reply.split("\n\n", 1)[1], {"mark_done"})
+
+
+def test_10c_done_and_meal_ideas_need_no_extra_line(coach, user, chat_model, fake_llm, patch_oura):
+    patch_oura()
+    chat = plan_at_noon(coach, user, chat_model, fake_llm)
+    patch_oura(workouts=[("running", "12:12", "13:03")])
+    reply = chat.send("done, what should I eat now?", 13, 10, [
+        call("mark_done", feeling=None), call("suggest_meal", meal=None, ingredients=None, constraints=None),
+        say("Two good options above, pick one!")])
+    confirmation, ideas_text = reply.split("\n\n")
+    assert confirmation == "Marked done: HIIT 12:12–1:03pm (from Oura). How did it feel?"
+    assert ideas_text.startswith("For your next meal, about ") and "pick one" not in reply
 
 
 def test_10c_a_draft_that_repeats_the_confirmation_is_dropped(coach, user, chat_model, fake_llm, patch_oura):
@@ -526,14 +693,153 @@ def test_live_12_free_form_replies_follow_the_rules(coach, user):
     assert "energy (1-5)" not in chat.lines[1]                          # a question, not a workout request
 
 
+# --- live: food (Phase 4) -------------------------------------------------------------------------
+
+FOOD_TOOLS = {"log_food", "edit_food", "remove_food", "remember", "forget"}
+
+
+@pytest.fixture
+def real_food(monkeypatch):
+    """Live tests: real food estimates (the re-estimate after an edit is what's checked)."""
+    monkeypatch.setattr(food, "structured_call", structured_call)
+
+
+@pytest.fixture
+def real_meals(monkeypatch):
+    """Live tests: real meal ideas and recipes (variety and same-dish revisions are what's checked)."""
+    monkeypatch.setattr(meals, "structured_call", structured_call)
+
+
+def assert_food_replies(chat):
+    for line in chat.lines[1::2]:
+        reply = line.split("coach: ", 1)[1]
+        if not reply.startswith("For ") and " · about " not in reply.splitlines()[0]:   # code-built meal texts
+            assert_rules(reply, FOOD_TOOLS)
+
+
 @live
-def test_live_correction_is_not_a_second_entry(coach, user):
+def test_live_2_correction_edits_the_row(coach, user):
     chat = Chat(coach, user)
-    chat.send("poppi strawberry lemon soda small can", 10, 0)
-    reply = chat.send("correction on that it is 3g fiber and 9g carbs. 30cal", 10, 2)
-    chat.print("correction guard")
-    assert len(food_today(user)) == 1
-    assert "remov" in reply.lower()
+    chat.send(POPPI, 10, 0)
+    chat.send("correction on that it is 3g fiber and 9g carbs. 30cal", 10, 2)
+    chat.print("scenario 2: correction")
+    [row] = rows_now()
+    assert (row["est_fiber_g"], row["est_carbs_g"], row["est_calories"]) == (3, 9, 30)
+    assert set(json.loads(row["user_numbers_json"])) == {"est_fiber_g", "est_carbs_g", "est_calories"}
+    assert food_totals(food_today(user))["calories"] == 30
+    assert facts(user) == ["Vegetarian, eats eggs", "Prefers Indian food"]
+    assert_food_replies(chat)
+
+
+@live
+def test_live_3_edit_that_re_estimates(coach, user, real_food):
+    chat = Chat(coach, user)
+    chat.send("I ate 5 slices of pizza at 3pm", 16, 0)
+    chat.send("it was cheese pizza with olives and onions, I don't think it's 60g protein. Edit that", 16, 5)
+    chat.print("scenario 3: edit that")
+    [row] = rows_now()
+    assert "olive" in row["raw_text"].lower() and "5" in row["raw_text"] and row["timestamp"][11:16] == "15:00"
+    assert row["est_protein_g"] < 60 and "est_protein_g" not in json.loads(row["user_numbers_json"])
+    assert_food_replies(chat)
+
+
+@live
+def test_live_4_remove_the_pizza(coach, user):
+    db.add_food(1, "chai", {"est_calories": 90, "est_protein_g": 3}, at(8))
+    db.add_food(1, "2 slices of pizza", {"est_calories": 500, "est_protein_g": 20}, at(13))
+    chat = Chat(coach, user)
+    reply = chat.send("remove the pizza", 16, 0)
+    chat.print("scenario 4: remove the pizza")
+    assert [f["raw_text"] for f in food_today(user)] == ["chai"] and "pizza" in reply.lower()
+    assert_food_replies(chat)
+
+
+@live
+def test_live_4b_two_pizzas_asks_which(coach, user):
+    for hour in (13, 15):
+        db.add_food(1, "2 slices of pizza", {"est_calories": 500, "est_protein_g": 20}, at(hour))
+    chat = Chat(coach, user)
+    reply = chat.send("remove the pizza", 16, 0)
+    chat.print("scenario 4b: two pizzas")
+    assert len(food_today(user)) == 2 and "?" in reply
+
+
+@live
+def test_live_5_ideas_recipe_and_higher_protein(coach, user, real_meals):
+    chat = Chat(coach, user)
+    first = chat.send("simple dinner ideas, I have dal, rice and spinach", 19, 0)
+    recipe = chat.send("give me the second one", 19, 1)
+    revised = chat.send("make it higher protein", 19, 2)
+    chat.print("scenario 5: ideas, the second one, higher protein")
+    options = [line.split(". ", 1)[1].split(" · ")[0] for line in first.splitlines() if line[:2] in ("1.", "2.")]
+    assert first.startswith("For dinner") and len(options) == 2 and " g (" in first
+    assert recipe.startswith(options[1]) and revised.startswith(f"{options[1]} (")
+    assert plans_today(user) == []
+
+
+@live
+def test_live_5b_two_days_of_dinner_ideas_are_different(coach, user, real_meals):
+    today_ = at(19).date()
+    chat = Chat(coach, user)
+    coach._fixture_day = today_ - timedelta(days=1)
+    day1 = chat.send("dinner ideas", 19, 0)
+    coach._fixture_day = today_
+    day2 = chat.send("dinner ideas", 19, 0)
+    chat.print("scenario 5b: dinner ideas two days in a row")
+    dishes = lambda text: {dish_key(line.split(". ", 1)[1].split(" · ")[0])  # noqa: E731
+                           for line in text.splitlines() if line[:2] in ("1.", "2.")}
+    assert dishes(day1) and dishes(day2) and dishes(day1).isdisjoint(dishes(day2))
+
+
+@live
+def test_live_15_16_questions_and_later_are_not_logged(coach, user):
+    chat = Chat(coach, user)
+    chat.send("should I have a Celsius right now?", 15, 0)
+    chat.send("I'm going to have pizza later", 15, 1)
+    chat.print("scenarios 15-16: a question, a plan to eat")
+    assert rows_now() == []
+    assert_food_replies(chat)
+
+
+@live
+def test_live_17_18_times_and_together(coach, user):
+    chat = Chat(coach, user)
+    chat.send("coffee at 8 and a banana at 10:30", 11, 0)
+    chat.send("2 eggs, toast and coffee for breakfast", 11, 1)
+    chat.print("scenarios 17-18: two times, eaten together")
+    times = sorted(f["timestamp"][11:16] for f in food_today(user))
+    assert times[:2] == ["08:00", "10:30"] and len(times) == 3                   # 2 rows + 1 row
+    assert_food_replies(chat)
+
+
+@live
+def test_live_19_after_midnight_before_bed(coach, user, patch_oura):
+    patch_oura(bedtime="01:30")
+    Health(use_fixtures=True).oura.raw(user, at(12).date(), now=at(0, 40))
+    chat = Chat(coach, user)
+    chat.send("had a bowl of maggi", 0, 50)
+    chat.print("scenario 19: 00:50, before the night's sleep")
+    assert len(food_on(user, at(12).date() - timedelta(days=1))) == 1 and food_on(user, at(12).date()) == []
+
+
+@live
+def test_live_20_delete_the_last_two(coach, user):
+    for text, hour in (("poha", 8), ("chai", 11), ("biscuits", 15)):
+        db.add_food(1, text, {"est_calories": 100}, at(hour))
+    chat = Chat(coach, user)
+    chat.send("delete the last two", 16, 0)
+    chat.print("scenario 20: delete the last two")
+    assert [f["raw_text"] for f in food_today(user)] == ["poha"]
+
+
+@live
+def test_live_list_food_any_day(coach, user):
+    db.add_food(1, "rajma chawal", {"est_calories": 600, "est_protein_g": 20}, at(13) - timedelta(days=2))
+    chat = Chat(coach, user)
+    reply = chat.send("what did I eat on Monday?", 9, 0)
+    chat.print("list_food: any day")
+    assert "rajma" in reply.lower()
+    assert_food_replies(chat)
 
 
 # --- live: training (Phase 3) ------------------------------------------------------------------
@@ -618,7 +924,8 @@ def test_live_10c_done_and_what_to_eat(coach, user, real_checkin, patch_oura):
     confirmation, _, answer = reply.partition("\n\n")
     assert confirmation.startswith("Marked done: HIIT 12:12–1:03pm (from Oura).")       # exactly as built
     assert answer and "Marked done" not in answer                                     # the rest, on its own
-    assert_rules(answer, {"mark_done"})
+    if not answer.startswith("For "):                                                 # not meal ideas built by code
+        assert_rules(answer, {"mark_done"})
 
 
 @live

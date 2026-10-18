@@ -14,7 +14,7 @@ You get a JSON block with:
 - `schedule`, `goals`, `checkin` (energy 1-5, soreness 0-5, a note, and constraints like "only 30 min" or "knee hurts" that you must respect; missing values mean not answered).
 - `strength_split_day`: which strength day is next (Push, Pull or Legs), decided by code.
 - `requested` (may be absent): the workout they asked for, as blocks in order (minutes may be null). Plan exactly those parts in that order and fill `blocks`; choose minutes for parts without any so the whole fits `free_until`. `they_chose_it_over_the_rules` true means they were told the rules suggest something easier and chose this anyway: plan it and say so plainly in `why`.
-- `food`: what they ate today, totals, today's targets (computed by code), what is left today, and whether this is the first plan of the day.
+- `food`: what they ate today, totals, today's targets (computed by code), what is left today, whether this is the first plan of the day, and `recent_meal_ideas` (dishes suggested in the last few days: don't repeat them).
 
 Fill in:
 - workout_type: HIIT, easy_run, long_run, strength, walk, mobility, or rest.
@@ -25,7 +25,7 @@ Fill in:
 - why: ONE plain sentence, at most 1-2 key numbers. Example: "Your readiness is 82 and HRV is above your usual, so it's a good day to push."
 - reasoning: the full reasoning with the actual numbers (readiness vs average, HRV, check-in, what they did today and yesterday, food so far). Shown only if they ask why.
 - food_before: one light option that fits their saved diet facts before this workout (e.g. "A banana or 2 dates 30 minutes before"). Empty for rest.
-- food_after: one meal that fits their saved diet facts, sized to what is left today (e.g. "Paneer bhurji with 2 rotis to cover most of the 60g protein left"). Use the numbers exactly as given.
+- food_after: one meal that fits their saved diet facts, sized to what is left today, with a household portion (e.g. "<dish> (1 katori) with 2 chapatis to cover most of the 60 g protein left"). Vary it: never a dish from `recent_meal_ideas`, and prefer foods from what they have been eating. Use the numbers exactly as given.
 - follow_up: only for rest: one short question offering something useful (e.g. "Want a 10-minute mobility routine instead?"). Otherwise "".
 - exercises: only for strength: exactly 5-6 exercises for `strength_split_day` (Push = chest, shoulders, triceps; Pull = back, biceps; Legs = quads, hamstrings, glutes, calves), each with sets_reps matched to the intensity (e.g. "4 x 8-10" for intensity 3-4, "3 x 12-15" for intensity 2). Otherwise [].
 - rules_applied: the goals.yaml rules (quote them) that shaped your choice.

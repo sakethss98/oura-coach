@@ -120,8 +120,9 @@ def _asked_this_turn(messages: list) -> bool:
 
 @tool(response_format="content_and_artifact")
 def confirm_override(choice: Literal["yes", "no"], messages: Messages, config: RunnableConfig) -> tuple[str, dict]:
-    """Their answer to "…I'd suggest X instead. Still want Y?": "yes" = plan what they asked for anyway,
-    "no" = plan the suggestion (also when they pick the suggestion, e.g. "ok, the walk")."""
+    """Their yes or no to the workout question ("I'd suggest a 30-min walk instead. Still want HIIT?"):
+    "yes" = plan what they asked for anyway, "no" = plan the suggestion (also when they pick the suggestion,
+    e.g. "ok, the walk"). Also for a yes/no to a question that expired (it tells them)."""
     t = turn(config)
     if _asked_this_turn(messages):
         return as_json({"planned": False, "reason": "They haven't answered the question yet. Stop and wait."}), {}

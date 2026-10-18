@@ -16,7 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from core import agent, db, users  # noqa: E402
 from core.config import DB_PATH, FIXTURES_DIR  # noqa: E402
 from modules.nutrition import food  # noqa: E402
-from modules.nutrition.schemas import FoodEstimate  # noqa: E402
+from modules.nutrition import meals  # noqa: E402
+from modules.nutrition.schemas import FoodEstimate, MealIdeas, MealOption, Portion, Recipe  # noqa: E402
 from modules.training import planner as graph  # noqa: E402
 from modules.training import checkin  # noqa: E402
 from modules.training.schemas import Block, CheckinParse, Plan, Request  # noqa: E402
@@ -49,8 +50,16 @@ def parsed_checkin(energy=None, soreness=None, blocks=(), feeling=None, constrai
                         constraints=list(constraints))
 
 
+def ideas(*dishes: str) -> MealIdeas:
+    """Meal ideas as the LLM would give them: one option per dish, with portions."""
+    return MealIdeas(options=[MealOption(dish=d, portions=[Portion(food="cooked dal", grams=200, household="1 katori"),
+                                                           Portion(food="chapati", grams=80, household="2 chapatis")],
+                                         est_calories=550, est_protein_g=25) for d in dishes])
+
+
 class FakeLLM:
-    """Stands in for llm.structured_call (plan, food, checkin): canned answers by call kind, every call recorded."""
+    """Stands in for llm.structured_call (plan, food, checkin, meal, recipe): canned answers by call kind,
+    every call recorded. `food_queue` / `meal_queue` give per-call answers in order (then the defaults)."""
 
     def __init__(self):
         self.plan = Plan(workout_type="HIIT", intensity=5, time_slot="07:00-07:40", duration_min=40,
@@ -59,6 +68,13 @@ class FakeLLM:
                          follow_up="", exercises=[], rules_applied=[], blocks=[])
         self.checkin = parsed_checkin(4, 2)
         self.food_calories = 450.0
+        self.food_queue: list[dict] = []          # estimate fields to change for the next food calls
+        self.meal = ideas("Dal palak with jeera rice", "Spinach moong dal khichdi")
+        self.meal_queue: list[MealIdeas] = []
+        self.recipe = Recipe(portions=[Portion(food="moong dal", grams=60, household="1/3 cup dry"),
+                                       Portion(food="spinach", grams=100, household="2 cups")],
+                             steps=["Rinse the dal and rice.", "Pressure cook with spinach for 3 whistles."],
+                             est_calories=520, est_protein_g=24)
         self.calls: list[tuple[str, str]] = []
 
     def kinds(self) -> list[str]:
@@ -71,23 +87,29 @@ class FakeLLM:
         if kind == "checkin":
             return self.checkin
         if kind == "food":
-            return FoodEstimate(entry_type="meal", est_protein_g=20, est_fiber_g=6, est_carbs_g=60,
-                                est_calories=self.food_calories, est_caffeine_mg=0, alcohol_drinks=0,
-                                confidence="med")
+            fields = {"entry_type": "meal", "est_protein_g": 20, "est_fiber_g": 6, "est_carbs_g": 60,
+                      "est_calories": self.food_calories, "est_caffeine_mg": 0, "alcohol_drinks": 0,
+                      "confidence": "med"}
+            return FoodEstimate(**fields | (self.food_queue.pop(0) if self.food_queue else {}))
+        if kind == "meal":
+            return self.meal_queue.pop(0) if self.meal_queue else self.meal
+        if kind == "recipe":
+            return self.recipe
         raise AssertionError(f"unexpected LLM call {kind}")
 
 
 @pytest.fixture
 def fake_llm(monkeypatch):
     fake = FakeLLM()
-    for module in (graph, food, checkin):
+    for module in (graph, food, checkin, meals):
         monkeypatch.setattr(module, "structured_call", fake)
     return fake
 
 
 @pytest.fixture
 def patch_oura(monkeypatch):
-    """Edit the loaded fixtures for one test: `patch_oura(readiness=64, workouts=[("running", "12:12", "13:03")])`.
+    """Edit the loaded fixtures for one test: `patch_oura(readiness=64, workouts=[("running", "12:12", "13:03")],
+    bedtime="01:30")`.
     Added workouts copy the shape of a real fixtures/workout.json record (same keys), on the fixtures' today.
     Call it before the first Oura read of the test (reads are cached)."""
     from connectors import oura as oura_connector
@@ -95,9 +117,12 @@ def patch_oura(monkeypatch):
     day = oura_connector.latest_day(raw).isoformat()
     monkeypatch.setattr(oura_connector, "load_fixtures", lambda: raw)
 
-    def apply(readiness=None, workouts=()):
+    def apply(readiness=None, workouts=(), bedtime=None):
         if readiness is not None:
             next(r for r in raw["daily_readiness"]["data"] if r["day"] == day)["score"] = readiness
+        if bedtime is not None:      # when today's main sleep started (the night before today, local time)
+            sleep = next(r for r in raw["sleep"]["data"] if r["day"] == day and r["type"] == "long_sleep")
+            sleep["bedtime_start"] = f"{day}T{bedtime}:00.000-05:00"
         template = raw["workout"]["data"][0]
         for n, (activity, start, end) in enumerate(workouts):
             raw["workout"]["data"].append({**template, "id": f"test-workout-{n}", "activity": activity, "day": day,
