@@ -10,8 +10,8 @@ from connectors.oura import HISTORY_DAYS, OuraSource, body_metrics, daily_metric
 
 
 class Health:
-    def __init__(self, use_fixtures: bool = False):
-        self.oura = OuraSource(use_fixtures)
+    def __init__(self, use_fixtures: bool = False, pinned: dict | None = None):
+        self.oura = OuraSource(use_fixtures, pinned)
         self.manual = ManualSource()
 
     # --- HealthSource, combined ---------------------------------------------

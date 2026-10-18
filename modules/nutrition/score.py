@@ -40,7 +40,8 @@ def score_day(entries: list[dict], targets: dict | None, rules: dict, rigor: str
     `after_cutoff`: the day is over (the calorie floor applies)."""
     if not entries:
         fraction = 0.0 if rules["no_food_scores_zero"] else None
-        return ScoreComponent("nutrition", fraction, "not logged", {"parts": []})
+        return ScoreComponent("nutrition", fraction, "not logged", {"parts": []},
+                              None if after_cutoff else "logging what you eat today")
 
     totals = food_totals(entries)
     meals = sum(1 for e in entries if e["entry_type"] in MEAL_TYPES)
@@ -62,7 +63,18 @@ def score_day(entries: list[dict], targets: dict | None, rules: dict, rigor: str
     weights = {p["name"]: rules["parts"][p["name"]] for p in parts}
     fraction = sum(p["fraction"] * weights[p["name"]] for p in parts) / sum(weights.values())
     return ScoreComponent("nutrition", round(fraction, 3), " · ".join(p["note"] for p in parts),
-                          {"parts": parts, "totals": totals})
+                          {"parts": parts, "totals": totals}, None if after_cutoff else _hint(totals, targets))
+
+
+def _hint(totals: dict, targets: dict | None) -> str | None:
+    """What would still help today: the protein (and calories) left, as plain numbers."""
+    if not targets:
+        return None
+    protein_left = targets["protein_g"] - totals["protein_g"]
+    kcal_left = targets["calories"] - totals["calories"]
+    if protein_left >= 15:
+        return f"about {protein_left:.0f} g more protein" + (f" in about {kcal_left:.0f} kcal" if kcal_left > 0 else "")
+    return None
 
 
 def is_after_cutoff(user, day, now: datetime | None) -> bool:

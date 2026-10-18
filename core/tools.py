@@ -16,9 +16,9 @@ from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
 
 from connectors.health import Health
-from core import memory, users
+from core import memory, score, users
 from core.day import day_of
-from core.timeparse import resolve_dates
+from core.timeparse import resolve_dates, resolve_past_day
 import today   # the shared day view (root module, also used by the training planner)
 
 
@@ -132,7 +132,27 @@ def refresh_health(config: RunnableConfig) -> str:
                                              "end": w["end"][11:16]} for w in workouts]})
 
 
-CORE_TOOLS = [remember, forget, list_memory, get_today, refresh_health]
+@tool
+def get_score(day: str | None, config: RunnableConfig) -> str:
+    """Their daily score ("how's my day?", "how did yesterday go?"): 0-100, the breakdown, and how it
+    compares to their own recent average. day: the day exactly as they said it, or null for today."""
+    t = turn(config)
+    d = resolve_past_day(day, t.day)
+    if d is None:
+        return as_json({"score": None, "reason": f"Could not read the day {day!r}. Ask which day."})
+    result = score.get_score(t.user, d, t.now, t.use_fixtures)
+    return as_json({
+        "day": f"{d:%A %b} {d.day}", "final": result["final"], "headline": result["headline"],
+        "parts": result["parts"], "left_out": [f"{p['name']} ({p['note']})" for p in result["left_out"]],
+        "still_helps_today": result["next"],
+        "how_to_reply": "Start with the headline as given. Then at most one line on what went well and, if the "
+                        "day isn't final, one kind suggestion from still_helps_today (e.g. 'a 20-min walk would "
+                        "round today out'). Numbers only as given. No blame or guilt words.",
+    })
+
+
+CORE_TOOLS = [remember, forget, list_memory, get_today, get_score, refresh_health]
 CORE_HELP = ['"remember I eat eggs", "forget that", "what do you know about me?"',
-             '"how\'s my day?", "what\'s left to eat today?", "update from Oura"']
+             '"how\'s my day?": your score so far, against your own recent average',
+             '"what\'s left to eat today?", "update from Oura"']
 

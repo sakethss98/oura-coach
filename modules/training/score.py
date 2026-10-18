@@ -10,6 +10,7 @@ The day = the best of its plans, or 1.0 if a counting workout happened before th
 (e.g. HIIT in the morning, a walk plan in the evening). No plans: 1.0 for any counting workout, else 0.
 A walk counts at 20+ min (goals.yaml activity.walk_counts); every other workout counts.
 Abandoned plans never reach this function (db.plans_between leaves them out).
+Before the day's cutoff an open plan is "still to do", and `next` says what would still help today.
 """
 from datetime import datetime
 
@@ -42,7 +43,7 @@ def _no_time_rest(plan: dict) -> bool:
             and (plan.get("details_json") or {}).get("plan_source") == "code")
 
 
-def score_plan(plan: dict, items: list[dict], rules: dict) -> tuple[float, str]:
+def score_plan(plan: dict, items: list[dict], rules: dict, day_over: bool = True) -> tuple[float, str]:
     """(fraction, note) for one plan of the day; `items` = the day's merged activity."""
     p = plan["plan_json"] or {}
     made_at = _made_at(plan)
@@ -61,24 +62,33 @@ def score_plan(plan: dict, items: list[dict], rules: dict) -> tuple[float, str]:
     other = [i for i in after if _counts(i, rules)]
     if other:
         return 0.5, f"{describe(other[0])} instead of the planned {_label(plan)}"
-    return 0.0, f"{_label(plan)} not done"
+    return 0.0, f"{_label(plan)} {'not done' if day_over else 'still to do'}"
 
 
-def score_day(plans: list[dict], items: list[dict], rules: dict) -> ScoreComponent:
+WALK_HINT = "a 20-minute walk (it counts as a workout)"
+
+
+def score_day(plans: list[dict], items: list[dict], rules: dict, day_over: bool = True) -> ScoreComponent:
     """`plans`: the day's plans (status planned, with blocks_done); `items`: the day's merged activity
-    (activity.merge_activity); `rules`: goals.yaml `activity`."""
+    (activity.merge_activity); `rules`: goals.yaml `activity`; `day_over`: the cutoff has passed."""
     plans = [p for p in plans if not _no_time_rest(p)]
     counting = [i for i in items if _counts(i, rules)]
     if not plans:
         if counting:
             return ScoreComponent("training", 1.0, describe(counting[0]), {"workouts": len(counting)})
-        return ScoreComponent("training", 0.0, "no workout", {})
+        return ScoreComponent("training", 0.0, "no workout yet" if not day_over else "no workout", {},
+                              None if day_over else WALK_HINT)
 
-    per_plan = [(plan["id"], *score_plan(plan, items, rules)) for plan in plans]
+    per_plan = [(plan["id"], *score_plan(plan, items, rules, day_over)) for plan in plans]
     _, fraction, note = max(per_plan, key=lambda x: x[1])
     first_made = min(_made_at(p) for p in plans)
     before = [i for i in counting if i["start"] is not None and i["start"] < first_made and "session_id" not in i]
     if before and fraction < 1.0:
         fraction, note = 1.0, f"{describe(before[0])} done"
+    hint = None
+    if fraction < 1.0 and not day_over:
+        latest = plans[-1]
+        is_rest = (latest["plan_json"] or {}).get("workout_type") == "rest"
+        hint = None if is_rest else f"your planned {_label(latest)}"
     return ScoreComponent("training", fraction, note,
-                          {"plans": [{"id": i, "fraction": f, "note": n} for i, f, n in per_plan]})
+                          {"plans": [{"id": i, "fraction": f, "note": n} for i, f, n in per_plan]}, hint)

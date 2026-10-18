@@ -903,6 +903,51 @@ def get_oura_cache(user_id: int) -> dict | None:
             "end_date": date.fromisoformat(row["end_date"]), "raw": json.loads(row["raw_json"])}
 
 
+# --- daily scores (core/score.py) -------------------------------------------
+
+def save_daily_score(user_id: int, day: date, result: dict, final: bool) -> None:
+    """Store a day's score (overwrites a provisional one; a final score is never replaced)."""
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO daily_scores (user_id, day, score, components_json, final, computed_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (user_id, day) DO UPDATE SET score = excluded.score, "
+            "components_json = excluded.components_json, final = excluded.final, computed_at = excluded.computed_at "
+            "WHERE daily_scores.final = 0",
+            (user_id, day.isoformat(), result["score"] if result["score"] is not None else 0,
+             json.dumps(result), int(final), _stamp()))
+
+
+def get_daily_score(user_id: int, day: date) -> dict | None:
+    """{"score", "final", "result" (what compute_score returned), "computed_at"} or None."""
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM daily_scores WHERE user_id = ? AND day = ?",
+                           (user_id, day.isoformat())).fetchone()
+    if row is None:
+        return None
+    return {"score": row["score"], "final": bool(row["final"]), "result": json.loads(row["components_json"]),
+            "computed_at": row["computed_at"]}
+
+
+def final_scores_between(user_id: int, start: date, end: date) -> list[dict]:
+    """Final scores with start <= day <= end that had something to score, oldest first."""
+    with connect() as conn:
+        rows = conn.execute("SELECT day, components_json FROM daily_scores WHERE user_id = ? AND final = 1 "
+                            "AND day BETWEEN ? AND ? ORDER BY day", (user_id, start.isoformat(), end.isoformat()))
+        found = [(r["day"], json.loads(r["components_json"])) for r in rows]
+    return [{"day": d, "score": result["score"]} for d, result in found if result["score"] is not None]
+
+
+def first_active_day(user_id: int) -> date | None:
+    """The first day they used the coach (a message, food or a plan), or None."""
+    with connect() as conn:
+        found = [conn.execute(q, (user_id,)).fetchone()[0] for q in (
+            "SELECT MIN(substr(ts, 1, 10)) FROM messages WHERE user_id = ?",
+            "SELECT MIN(substr(timestamp, 1, 10)) FROM food_log WHERE user_id = ?",
+            "SELECT MIN(date) FROM plans WHERE user_id = ?")]
+    days = [date.fromisoformat(d) for d in found if d]
+    return min(days) if days else None
+
+
 # --- legacy (Phase 1 only: the old /undo and context-note flow) ---------------
 
 def undo_last(user_id: int) -> dict | None:

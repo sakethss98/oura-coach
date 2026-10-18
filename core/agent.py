@@ -17,7 +17,7 @@ from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from connectors.health import Health
-from core import db, memory, reply_rules
+from core import db, memory, reply_rules, score
 from core.config import CONSULT_TTL_MIN, OPENAI_MODEL
 from core.day import day_of
 from core.llm import load_prompt
@@ -92,6 +92,8 @@ def ingest(state: AgentState, config) -> dict:
     t = turn(config)
     # A "still want HIIT?" question lasts 2 hours, across sessions; unanswered, it expires with no plan.
     db.expire_consults(t.user.id, t.now, timedelta(minutes=CONSULT_TTL_MIN))
+    # Days whose cutoff has passed get their final score now, before this message can change them.
+    score.finalize_quietly(t.user, t.now, t.use_fixtures)
     pending = db.pending_plan(t.user.id)
     expired = False
     if pending and pending["chat_session_id"] != t.session_id:

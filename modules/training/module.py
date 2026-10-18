@@ -63,10 +63,14 @@ class TrainingModule:
         """Did the day's plan happen (modules/training/score.py)? Marks what Oura recorded first."""
         import today   # the shared day view (root module); imported here so loading the module stays light
         rules = user.goals()["activity"]
-        bundle = (self.health or Health()).bundle(user, day)
+        bundle = (self.health or Health()).bundle(user, day, now=now)
         today.sync_oura_completions(user, day, bundle["workouts_by_day"], rules)
         items = today.day_activity(user, day, bundle, rules)[day.isoformat()]
-        return score_day(db.plans_between(user.id, day, day), items, rules)
+        plans = db.plans_between(user.id, day, day)
+        if not plans and not items and bundle["today"]["steps"] is None:
+            return ScoreComponent("training", None, "no activity data")    # no wearable data: left out, not 0
+        day_over = now is None or now >= datetime.combine(day, user.score_cutoff, user.tz)
+        return score_day(plans, items, rules, day_over)
 
     def help_lines(self) -> list[str]:
         return ['"want to work out now": I ask how you feel, then plan a workout for right now',

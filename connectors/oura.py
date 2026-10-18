@@ -184,6 +184,9 @@ def daily_metrics(raw: dict, day: date, tz=TZ) -> dict:
         "temperature_deviation": readiness.get("temperature_deviation"),
         "sleep_score": sleep_score.get("score"),
         "sleep_hours": hours(main_sleep.get("total_sleep_duration")),
+        "time_in_bed_hours": hours(main_sleep.get("time_in_bed")),
+        "bedtime_start": local(main_sleep["bedtime_start"]).isoformat(timespec="minutes")
+                         if main_sleep.get("bedtime_start") else None,
         "hrv_ms": main_sleep.get("average_hrv"),
         "resting_hr": main_sleep.get("lowest_heart_rate"),
         "stress_summary": stress.get("day_summary"),
@@ -223,13 +226,17 @@ class OuraSource:
     reads the cache, like core.day, sees the fixtures too). User 1 is the only user with Oura tokens today.
     """
 
-    def __init__(self, use_fixtures: bool = False):
+    def __init__(self, use_fixtures: bool = False, pinned: dict | None = None):
         self.use_fixtures = use_fixtures
+        self.pinned = pinned      # an oura_cache row to read instead of fetching (daily scores: one fetch for all days)
 
     def raw(self, user, day: date, refresh: bool = False, now: datetime | None = None,
             allow_stale: bool = False) -> dict:
         """Raw responses covering day-7 .. day. A fresh cache that covers them is reused unless `refresh`;
-        with `allow_stale` any cached copy that covers them is reused (no fetch unless there is none)."""
+        with `allow_stale` any cached copy that covers them is reused (no fetch unless there is none).
+        A pinned copy that covers `day` itself is always used (days before it may be missing)."""
+        if self.pinned and not refresh and self.pinned["start_date"] <= day < self.pinned["end_date"]:
+            return self.pinned["raw"]
         now = now or datetime.now(user.tz)
         start, end = day - timedelta(days=HISTORY_DAYS), day + timedelta(days=1)
         cache = db.get_oura_cache(user.id)

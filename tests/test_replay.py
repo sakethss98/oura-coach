@@ -7,10 +7,11 @@ Plan and food estimates are stubbed in both (fake_llm), so numbers are predictab
 the check-in answer with the real model (real_checkin), since that is understanding too.
 Scenario ids and wording: docs/scenarios.md. Phase 2: 1, 8, 9, 11, 12 and the correction guard.
 Phase 3 (training): 6, 7, 7b, 7c, 7d, 10, 10b, 10c, 21-25. Phase 4 (food): 2, 3, 4, 4b, 5, 5b, 15-20.
-The rest come with Phases 5-6.
+Phase 5 (daily score): 14, 29, 30, 31. The rest come with Phase 6.
 """
 import json
 import os
+import re
 from datetime import time, timedelta
 
 import pytest
@@ -18,7 +19,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
 from connectors.health import Health
-from core import db, memory
+from core import db, memory, score
 from core.agent import EXPIRED_CHECKIN
 from core.coach import VOICE, Coach
 from core.reply_rules import violations
@@ -374,6 +375,76 @@ def test_list_food_reads_any_past_day(coach, user, chat_model):
     assert last_tool_result(chat_model, "list_food")["entries"] == []
     chat.send("and next Friday?", 9, 2, [call("list_food", day="next Friday"), say("That hasn't happened yet.")])
     assert "Could not read the day" in last_tool_result(chat_model, "list_food")["reason"]
+
+
+# --- daily score (Phase 5) ---------------------------------------------------------------------
+
+GUILT = re.compile(r"\b(missed|failed|fail|only|should have|bad|behind|lazy|disappointing)\b", re.I)
+
+
+def score_turn(day=None):
+    return [call("get_score", day=day), say("")]
+
+
+def score_result(chat_model):
+    return last_tool_result(chat_model, "get_score")
+
+
+def part(result, name):
+    return next(p for p in result["parts"] if p["name"] == name)
+
+
+def test_14_hows_my_day_twice_gives_the_same_score_and_breakdown(coach, user, chat_model):
+    chat = Chat(coach, user, chat_model)
+    db.add_food(1, "poha", {"entry_type": "meal", "est_calories": 400, "est_protein_g": 12}, at(8))
+    chat.send("how's my day", 12, 0, [call("get_score", day=None), say("25 so far.")])
+    first = score_result(chat_model)
+    chat.send("how's my day", 12, 1, [call("get_score", day=None), say("25 so far.")])
+    assert score_result(chat_model) == first
+    assert first["headline"].endswith(" so far") and first["headline"].split()[0].isdigit()   # no average yet
+    assert db.get_daily_score(1, at(12).date())["final"] is False
+
+
+def test_29_no_food_logged_scores_nutrition_zero_and_says_not_logged(coach, user, chat_model):
+    Chat(coach, user, chat_model).send("how's my day", 12, 0, [call("get_score", day=None),
+                                                               say("A walk and some food would round today out.")])
+    nutrition = part(score_result(chat_model), "nutrition")
+    assert (nutrition["points"], nutrition["note"]) == (0, "not logged")
+    assert "logging what you eat today" in score_result(chat_model)["still_helps_today"]
+
+
+def test_30_under_the_calorie_floor_after_the_cutoff_scores_calories_zero(coach, user, chat_model):
+    db.add_food(1, "toast", {"entry_type": "meal", "est_calories": 800, "est_protein_g": 126}, at(9))
+    chat = Chat(coach, user, chat_model)
+    chat.send("how's my day", 20, 0, score_turn())
+    evening = part(score_result(chat_model), "nutrition")
+    chat.send("how's my day", 21, 30, score_turn())
+    night_ = part(score_result(chat_model), "nutrition")
+    assert "well under your target" not in evening["note"] and "well under your target" in night_["note"]
+    assert night_["points"] == 14                     # protein full (40% of 30 = 12) + 1 of 3 meals (2); calories 0
+    assert score_result(chat_model)["final"] is True
+
+
+def test_31_after_the_cutoff_food_does_not_change_the_score(coach, user, chat_model):
+    db.add_food(1, "dal rice", {"entry_type": "meal", "est_calories": 1200, "est_protein_g": 40}, at(13))
+    chat = Chat(coach, user, chat_model)
+    chat.send("how's my day", 20, 0, score_turn())
+    chat.send("had a cookie", 21, 30, [call("log_food", text="a cookie", time_text=None),
+                                       say("Logged a cookie: about 450 kcal, 20 g protein.")])
+    final = db.get_daily_score(1, at(12).date())
+    assert final["final"] and "a cookie" in [f["raw_text"] for f in food_today(user)]    # logged, not scored
+    chat.send("how's my day", 21, 31, score_turn())
+    assert score_result(chat_model)["parts"] == final["result"]["parts"]
+    assert score_result(chat_model)["headline"].startswith(f"{final['score']} today")
+
+
+def test_the_score_compares_to_their_own_7_day_average(coach, user, chat_model):
+    for back, value in ((1, 20), (2, 22), (3, 24)):
+        db.save_daily_score(1, at(12).date() - timedelta(days=back), {"score": value, "parts": []}, final=True)
+    db.add_food(1, "poha", {"entry_type": "meal", "est_calories": 400, "est_protein_g": 12}, at(8))
+    Chat(coach, user, chat_model).send("how's my day", 12, 0, score_turn())
+    headline_ = score_result(chat_model)["headline"]
+    assert headline_.endswith(", up from your 22 average") and headline_.split()[0].isdigit()
 
 
 # --- training (Phase 3): helpers --------------------------------------------------------------
@@ -840,6 +911,53 @@ def test_live_list_food_any_day(coach, user):
     chat.print("list_food: any day")
     assert "rajma" in reply.lower()
     assert_food_replies(chat)
+
+
+# --- live: daily score (Phase 5) -------------------------------------------------------------------
+
+def assert_kind_score_reply(reply, headline_):
+    assert headline_.split(",")[0] in reply, reply                               # the code's number, as given
+    assert not GUILT.search(reply), reply
+    assert_rules(reply, set())
+
+
+@live
+def test_live_14_hows_my_day_twice(coach, user):
+    db.add_food(1, "poha", {"entry_type": "meal", "est_calories": 400, "est_protein_g": 12}, at(8))
+    for back, value in ((1, 20), (2, 22), (3, 24)):
+        db.save_daily_score(1, at(12).date() - timedelta(days=back), {"score": value, "parts": []}, final=True)
+    chat = Chat(coach, user)
+    first = chat.send("how's my day", 12, 0)
+    second = chat.send("how's my day", 12, 1)
+    chat.print("scenario 14: how's my day twice")
+    stored = db.get_daily_score(1, at(12).date())
+    headline_ = score.headline(stored["score"], False, 22, at(12).date(), at(12).date())
+    assert_kind_score_reply(first, headline_) and assert_kind_score_reply(second, headline_)
+    assert "up from your 22 average" in first
+
+
+@live
+def test_live_29_no_food(coach, user):
+    chat = Chat(coach, user)
+    reply = chat.send("how's my day", 12, 0)
+    chat.print("scenario 29: no food logged")
+    stored = db.get_daily_score(1, at(12).date())
+    assert next(p for p in stored["result"]["parts"] if p["name"] == "nutrition")["note"] == "not logged"
+    assert_kind_score_reply(reply, f"{stored['score']} so far")
+
+
+@live
+def test_live_30_31_under_the_floor_then_food_after_the_cutoff(coach, user):
+    db.add_food(1, "toast", {"entry_type": "meal", "est_calories": 800, "est_protein_g": 126}, at(9))
+    chat = Chat(coach, user)
+    chat.send("had a cookie", 21, 30)
+    reply = chat.send("how's my day", 21, 31)
+    chat.print("scenarios 30-31: under the floor, then food after the cutoff")
+    final = db.get_daily_score(1, at(12).date())
+    nutrition = next(p for p in final["result"]["parts"] if p["name"] == "nutrition")
+    assert final["final"] and "800 of 2218 kcal, well under your target" in nutrition["note"]   # the cookie isn't in
+    assert len(food_today(user)) == 2
+    assert_kind_score_reply(reply, f"{final['score']} today")
 
 
 # --- live: training (Phase 3) ------------------------------------------------------------------

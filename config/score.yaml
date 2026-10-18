@@ -1,5 +1,39 @@
-# The daily score, computed in code. Phase 4 adds the nutrition part; Phase 5 adds the template weights,
-# recovery and movement.
+# The daily score (0-100), computed in code (core/score.py); the LLM only words the breakdown.
+# A component with no data (no wearable, no steps) is left out and the rest re-weighted, never scored 0.
+# Food not logged is the exception: nutrition is then 0, "not logged" (it is the person's own log).
+
+templates:                       # user_settings.goal_template -> goal_rigor
+  endurance_body_comp:
+    light:
+      weights: {training: 30, nutrition: 30, recovery: 25, movement: 15}
+      steps_target: 6000
+      bed_hours_target: 7.0      # time in bed for sleep (Oura time_in_bed)
+    moderate:
+      weights: {training: 35, nutrition: 30, recovery: 20, movement: 15}
+      steps_target: 8000
+      bed_hours_target: 7.5
+    intense:
+      weights: {training: 40, nutrition: 30, recovery: 15, movement: 15}
+      steps_target: 10000
+      bed_hours_target: 8.0
+
+recovery:                        # what the person controls, never raw readiness or sleep quality
+  parts:                         # share of the recovery component (re-weighted when a part has no data)
+    time_in_bed: 0.5             # last night's time in bed vs the target; full at the target
+    bedtime: 0.3                 # last night's bedtime vs their usual (the nights before)
+    low_readiness_day: 0.2       # only on a low-readiness day: no hard workout = full
+  time_in_bed_zero_under_h: 2.5  # time-in-bed part is 0 this many hours under the target
+  bedtime_full_within_min: 30
+  bedtime_zero_after_min: 90
+  bedtime_min_nights: 3          # nights needed to know their usual bedtime
+
+movement:
+  steps_per_walk_min: 110        # for "a 20-min walk would round today out"
+
+compare:
+  days: 7                        # "up from your 68 average" = final scores of the 7 days before
+  min_days: 3
+
 nutrition:
   parts:                         # share of the nutrition component (adds up to 1)
     protein: 0.4                 # linear: 0 g = 0, the daily target = full

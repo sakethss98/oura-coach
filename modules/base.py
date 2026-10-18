@@ -16,6 +16,7 @@ class ScoreComponent:
     fraction: float | None    # 0.0-1.0 of this component earned (None = nothing to score)
     note: str                 # plain words for the breakdown, e.g. "run done"
     details: dict = field(default_factory=dict)
+    next: str | None = None   # what would still help today, as a plain fact ("a 20-minute walk"); None when done
 
 
 @dataclass

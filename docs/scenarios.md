@@ -89,3 +89,9 @@ These came from live use on 2026-10-17.
 - **5b** "dinner ideas" on two days in a row → no dish repeats (same main dish counts). Must not: the same dish both days.
 - **4c** Two pizza entries, "remove the pizza", and the model tries to remove both → refused in code, it asks; "both" → both removed.
 - **3b** "I don't think it's 60g protein" (a doubt, no number) → the estimate is redone with it; protein is not recorded as their number.
+
+## Added during Phase 5 (2026-10-18)
+
+- **14b** "how's my day" with 3+ final days stored → the headline compares to their own average ("74 so far, up from your 68 average").
+- **33** No wearable data for the day → training, recovery and movement left out, nutrition re-weighted to 100. Must not: score a missing component 0. (tests/test_score.py)
+- **34** Low readiness, no hard workout → recovery not lowered ("took it easy on a low-readiness day"). (tests/test_score.py)
