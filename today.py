@@ -86,13 +86,15 @@ def day_activity(user, day: date, oura: dict, rules: dict) -> dict[str, list[dic
     return result
 
 
-def sync_oura_completions(user, day: date, oura_workouts_by_day: dict, rules: dict) -> list[int]:
-    """Mark today's open plans done when Oura recorded a matching workout around the planned time."""
+def sync_oura_completions(user, day: date, oura_workouts_by_day: dict, rules: dict) -> list[tuple[int, int]]:
+    """Mark blocks of today's open plans done when Oura recorded a matching workout around the
+    block's planned time, with Oura's times. Returns the (plan id, block index) pairs it marked."""
     from_oura = activity.oura_items(oura_workouts_by_day.get(day.isoformat(), []), rules)
     done = []
-    for plan, workout in activity.match_open_plans(db.open_plans(user.id, day), from_oura):
-        db.mark_done(plan["id"], None, workout["end"], workout["start"], workout["end"], done_by="oura")
-        done.append(plan["id"])
+    for plan, index, workout in activity.match_open_plans(db.open_plans(user.id, day), from_oura):
+        db.mark_block_done(plan["id"], index, workout["start"], workout["end"], workout["minutes"], "oura",
+                           workout["end"])
+        done.append((plan["id"], index))
     return done
 
 

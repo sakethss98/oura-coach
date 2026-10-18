@@ -157,3 +157,32 @@ def test_walk_rule_uses_the_band_it_is_given():
     walk = items([oura("walking", t(7), 30)])
     assert worked_out(walk, "push", RULES) is None
     assert worked_out(walk, "maintain", RULES) == "30-min walk at 7:00am"
+
+
+# --- plans with several blocks: done and matched per block (M3.2) ------------------
+
+RUN_THEN_STRENGTH = {"workout_type": "easy_run", "intensity": 3, "time_slot": "06:30-07:20", "duration_min": 50,
+                     "blocks": [{"workout_type": "easy_run", "intensity": 3, "duration_min": 20},
+                                {"workout_type": "strength", "intensity": 3, "duration_min": 30}]}
+
+
+def two_block_plan(blocks_done=None):
+    return {**open_plan("easy_run"), "plan_json": RUN_THEN_STRENGTH, "blocks_done": blocks_done or {}}
+
+
+def test_each_block_is_matched_to_its_own_oura_workout():
+    workouts = oura_items([oura("strengthTraining", t(6, 55), 25), oura("running", t(6, 30), 22)], RULES)
+    found = match_open_plans([two_block_plan()], workouts)
+    assert [(index, o["activity"]) for _, index, o in found] == [(0, "running"), (1, "strengthTraining")]
+
+
+def test_a_done_block_is_skipped_and_its_oura_workout_is_not_reused():
+    run = oura("running", t(6, 30), 22)
+    done = {0: {"start": run["start"], "end": run["end"], "minutes": 22, "done_by": "oura"}}
+    assert match_open_plans([two_block_plan(done)], oura_items([run], RULES)) == []
+
+
+def test_done_blocks_are_separate_activity_items():
+    done = {1: {"start": t(6, 50).isoformat(), "end": t(7, 20).isoformat(), "minutes": 30, "done_by": "chat"}}
+    [item] = session_items([{**two_block_plan(done), "completed": None}], RULES)
+    assert (item["workout_type"], item["minutes"], item["start"]) == ("strength", 30, t(6, 50))

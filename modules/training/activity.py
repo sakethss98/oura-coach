@@ -5,21 +5,18 @@ Pure functions. `rules` is the `activity` section of goals.yaml:
   walk_counts: {min_minutes: N, not_on_bands: [...]}   when a walk counts as a light workout
 
 A plan (or manual workout) and an Oura workout whose times overlap are the same activity and appear once.
-Only plans marked done and manual workouts count; a plan I never confirmed does not,
-unless Oura recorded a matching workout around the planned time (`match_open_plans`).
+Only done blocks of plans and manual workouts count; a plan I never confirmed does not,
+unless Oura recorded a matching workout around that block's planned time (`match_open_plans`).
 """
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, timedelta
 
 from core.config import TZ
 from core.labels import clock, oura_label, workout_label
+from modules.training.blocks import HARD_INTENSITY, HARD_TYPES, block_slots, blocks_of
 
-HARD_TYPES = {"HIIT", "long_run"}
-HARD_INTENSITY = 4
 RUN_TYPES = {"easy_run", "long_run"}
 OURA_RUN = "running"
 OURA_WALK = "walking"
-# A done session with no known length gets this much time before the report, for overlap only.
-UNKNOWN_DURATION = timedelta(minutes=60)
 # An Oura workout completes an open plan if it overlaps the planned slot widened by this much.
 OURA_MATCH_SLACK = timedelta(minutes=60)
 # Which Oura activities can complete a planned type (None = any activity).
@@ -53,33 +50,46 @@ def oura_items(workouts: list[dict], rules: dict) -> list[dict]:
     return items
 
 
+def done_blocks(session: dict) -> list[tuple[int, dict, dict]]:
+    """(index, block, {start, end, minutes, done_by}) for each done block of a plan. An older plan marked
+    done as a whole (no block records) is its single block, with the plan's actual times."""
+    plan = session["plan_json"] or {}
+    blocks = blocks_of(plan)
+    if session.get("blocks_done"):
+        return [(i, blocks[i], d) for i, d in sorted(session["blocks_done"].items()) if i < len(blocks)]
+    if session["completed"] != 1:
+        return []
+    start, end = _dt(session["actual_start"]), _dt(session["actual_end"])
+    minutes = round((end - start).total_seconds() / 60) if start and end else plan.get("duration_min")
+    block = {"workout_type": plan.get("workout_type", "other"), "intensity": plan.get("intensity"),
+             "duration_min": plan.get("duration_min")}
+    return [(0, block, {"start": start, "end": end, "minutes": minutes, "done_by": session.get("done_by")})]
+
+
 def session_items(sessions: list[dict], rules: dict) -> list[dict]:
-    """Done plans as activity items."""
+    """Done blocks of plans as activity items (one per block)."""
     run_rule = rules.get("hard_oura", {}).get(OURA_RUN)
     items = []
     for s in sessions:
-        if s["completed"] != 1:
-            continue
-        plan = s["plan_json"] or {}
-        workout_type = plan.get("workout_type", "other")
-        start, end = _dt(s["actual_start"]), _dt(s["actual_end"])
-        minutes = round((end - start).total_seconds() / 60) if start and end else plan.get("duration_min")
-        long_enough_run = (workout_type in RUN_TYPES and run_rule is not None and minutes is not None
-                           and minutes >= run_rule["min_minutes"])
-        items.append({
-            "source": "session",
-            "session_id": s["id"],
-            "activity": workout_type,
-            "label": workout_label(workout_type, plan.get("split_day")),
-            "workout_type": workout_type,
-            "start": start,
-            "end": end,
-            "minutes": minutes,
-            "is_walk": workout_type == "walk",
-            "hard": (workout_type in HARD_TYPES or (plan.get("intensity") or 0) >= HARD_INTENSITY
-                     or long_enough_run),
-            "feeling": s["feeling"],
-        })
+        split_day = (s["plan_json"] or {}).get("split_day")
+        for _, block, done in done_blocks(s):
+            workout_type, minutes = block["workout_type"], done["minutes"]
+            long_enough_run = (workout_type in RUN_TYPES and run_rule is not None and minutes is not None
+                               and minutes >= run_rule["min_minutes"])
+            items.append({
+                "source": "session",
+                "session_id": s["id"],
+                "activity": workout_type,
+                "label": workout_label(workout_type, split_day),
+                "workout_type": workout_type,
+                "start": _dt(done["start"]),
+                "end": _dt(done["end"]),
+                "minutes": minutes,
+                "is_walk": workout_type == "walk",
+                "hard": (workout_type in HARD_TYPES or (block["intensity"] or 0) >= HARD_INTENSITY
+                         or long_enough_run),
+                "feeling": s["feeling"],
+            })
     return items
 
 
@@ -166,35 +176,39 @@ def hard_reason(items: list[dict]) -> str | None:
     return ", ".join(describe(i) for i in hard) or None
 
 
-def match_open_plans(open_sessions: list[dict], oura: list[dict]) -> list[tuple[dict, dict]]:
-    """(session, Oura item) pairs where Oura recorded a planned-but-unconfirmed workout.
+def match_open_plans(open_sessions: list[dict], oura: list[dict]) -> list[tuple[dict, int, dict]]:
+    """(session, block index, Oura item) where Oura recorded a planned block that isn't done yet.
 
-    Match = a compatible Oura activity overlapping the planned slot widened by 60 min each side.
-    Each Oura workout completes at most one plan.
+    Match = an Oura activity compatible with that block, overlapping the block's own planned time
+    widened by 60 min each side. Each Oura workout completes at most one block (one that already
+    completed a block is taken).
     """
-    pairs, used = [], set()
+    taken = {(_dt(d["start"]), _dt(d["end"])) for s in open_sessions for d in (s.get("blocks_done") or {}).values()}
+    used = {i for i, o in enumerate(oura) if (o["start"], o["end"]) in taken}
+    found = []
     for s in open_sessions:
-        plan = s["plan_json"] or {}
-        slot = plan.get("time_slot") or "none"
-        if s["completed"] == 1 or plan.get("workout_type") not in OURA_MATCHES or slot == "none":
+        if s["completed"] == 1:
             continue
-        day = date.fromisoformat(s["date"])
-        start, end = (datetime.combine(day, time.fromisoformat(t), TZ) for t in slot.split("-"))
-        allowed = OURA_MATCHES[plan["workout_type"]]
-        for i, o in enumerate(oura):
-            if i in used or (allowed is not None and o["activity"] not in allowed):
+        plan, done = s["plan_json"] or {}, s.get("blocks_done") or {}
+        slots = block_slots(plan, date.fromisoformat(s["date"]), TZ)
+        for index, (block, (start, end)) in enumerate(zip(blocks_of(plan), slots)):
+            if index in done or block["workout_type"] not in OURA_MATCHES:
                 continue
-            if o["start"] < end + OURA_MATCH_SLACK and start - OURA_MATCH_SLACK < o["end"]:
-                pairs.append((s, o))
-                used.add(i)
-                break
-    return pairs
+            allowed = OURA_MATCHES[block["workout_type"]]
+            for i, o in enumerate(oura):
+                if i in used or (allowed is not None and o["activity"] not in allowed):
+                    continue
+                if o["start"] < end + OURA_MATCH_SLACK and start - OURA_MATCH_SLACK < o["end"]:
+                    found.append((s, index, o))
+                    used.add(i)
+                    break
+    return found
 
 
 def next_split_day(sessions: list[dict], split: list[str]) -> str:
-    """The split day after the last done strength session that recorded one (oldest-first list)."""
+    """The split day after the last done strength block that recorded one (oldest-first list)."""
     for s in reversed(sessions):
-        plan = s["plan_json"] or {}
-        if s["completed"] == 1 and plan.get("workout_type") == "strength" and plan.get("split_day") in split:
-            return split[(split.index(plan["split_day"]) + 1) % len(split)]
+        split_day = (s["plan_json"] or {}).get("split_day")
+        if split_day in split and any(b["workout_type"] == "strength" for _, b, _ in done_blocks(s)):
+            return split[(split.index(split_day) + 1) % len(split)]
     return split[0]

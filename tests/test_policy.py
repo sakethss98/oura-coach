@@ -264,7 +264,13 @@ def test_why_is_the_coachs_when_code_changed_nothing():
 def test_why_uses_the_deciding_override():
     final, overrides = policy_check(plan("HIIT", 5), ctx(readiness=65))
     assert deciding_override(overrides)["rule"] == "readiness_floor"
-    assert why_sentence(final, overrides, body_ok=False).startswith("Your readiness is 65")
+    assert why_sentence(final, overrides, body_ok=False) == "Readiness is 65 today, on the low side, so I'd keep it light."
+
+
+def test_low_readiness_is_said_against_their_usual_without_internal_terms():
+    _, overrides = policy_check(plan("HIIT", 5), ctx(readiness=64, readiness_usual=78.4))
+    assert overrides[0]["plain"] == "Readiness is 64 today, lower than usual, so I'd keep it light."
+    assert all("floor" not in o["plain"] for o in overrides)
 
 
 def test_why_says_the_body_could_do_more_when_something_else_decided():
@@ -278,3 +284,69 @@ def test_no_time_left_decides_even_for_a_rest_plan():
     final, overrides = policy_check(plan("rest", 1, "none", 0), ctx(window=None))
     assert why_sentence(final, overrides, body_ok=True) == (
         "Your body could handle more, but there's no free time left today.")
+
+
+# --- several blocks (M3.2) ------------------------------------------------------
+
+from modules.training.policy import conflicts  # noqa: E402
+
+
+def two_blocks(first=("easy_run", 3, 20), second=("strength", 3, 30), time_slot="06:30-07:20"):
+    blocks = [{"workout_type": t, "intensity": i, "duration_min": m} for t, i, m in (first, second)]
+    return {**plan(time_slot=time_slot), "blocks": blocks, "duration_min": sum(b["duration_min"] for b in blocks)}
+
+
+def test_blocks_pass_in_order_and_the_slot_covers_both():
+    final, overrides = policy_check(two_blocks(), ctx())
+    assert [b["workout_type"] for b in final["blocks"]] == ["easy_run", "strength"]
+    assert final["time_slot"] == "06:30-07:20" and final["duration_min"] == 50
+    assert overrides == []
+
+
+def test_type_rules_apply_to_every_block_and_same_types_merge():
+    final, overrides = policy_check(two_blocks(("HIIT", 5, 20)), ctx(band="recover"))
+    assert final["workout_type"] == "walk" and final["duration_min"] == 50
+    assert "blocks" not in final                       # walk + walk became one walk
+    assert sum(o["changes_type"] for o in overrides) == 2
+
+
+def test_the_day_is_hard_if_any_block_is_and_every_hard_block_is_downgraded():
+    final, overrides = policy_check(two_blocks(("HIIT", 5, 20), ("strength", 4, 30)), ctx(yesterday_hard="HIIT"))
+    assert [(b["workout_type"], b["intensity"]) for b in final["blocks"]] == [("easy_run", 3), ("strength", 3)]
+    assert [o["rule"] for o in overrides] == ["back_to_back", "back_to_back"]
+
+
+def test_too_long_cuts_the_last_block_and_drops_one_under_10_min():
+    final, _ = policy_check(two_blocks(("easy_run", 3, 40), ("strength", 3, 30), "08:00-09:10"), ctx())
+    assert [(b["workout_type"], b["duration_min"]) for b in final["blocks"]] == [("easy_run", 40), ("strength", 20)]
+    final, _ = policy_check(two_blocks(("easy_run", 3, 55), ("strength", 3, 30), "08:00-09:25"), ctx())
+    assert "blocks" not in final and final["duration_min"] == 55 and final["time_slot"] == "08:00-08:55"
+
+
+def test_user_choice_keeps_the_request_and_records_each_skipped_rule():
+    asked = plan("HIIT", 5, "06:30-07:00", 30)
+    final, overrides = policy_check(asked, ctx(readiness=64, band=band("recover")), user_choice=True)
+    assert (final["workout_type"], final["intensity"]) == ("HIIT", 5)
+    assert {o["rule"] for o in overrides} == {"user_choice"}
+    assert {o["skipped"] for o in overrides} == {"readiness_floor"}     # the band rule found it light already
+    assert all(o["plain"].startswith("You chose this over: ") and not o["changes_type"] for o in overrides)
+
+
+def test_user_choice_still_fits_the_clock():
+    final, overrides = policy_check(plan("HIIT", 5, "08:30-09:30", 60), ctx(readiness=64), user_choice=True)
+    assert final["time_slot"] == "08:30-09:00"
+    assert overrides[-1]["rule"] == "window"
+    final, _ = policy_check(plan("HIIT", 5), ctx(window=None), user_choice=True)
+    assert final["workout_type"] == "rest"
+
+
+def test_conflicts_are_type_changes_or_a_hard_day_made_easy_never_the_clock():
+    asked = plan("HIIT", 5, "10:00-11:00", 60)
+    final, overrides = policy_check(asked, ctx(band="maintain"))
+    assert [o["rule"] for o in conflicts(asked, final, overrides)] == ["band"]          # the type change, not the cap
+    asked = plan("strength", 5, "06:30-07:00", 30)                  # hard by intensity only
+    final, overrides = policy_check(asked, ctx(band="maintain"))
+    assert final["workout_type"] == "strength" and conflicts(asked, final, overrides)
+    asked = plan("easy_run", 3, "10:00-11:00", 60)                  # only the clock changed
+    final, overrides = policy_check(asked, ctx())
+    assert overrides and conflicts(asked, final, overrides) == []

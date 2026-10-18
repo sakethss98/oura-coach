@@ -55,3 +55,6 @@ def redact(text: str) -> str:
         if value and len(value) >= 6:
             text = text.replace(value, "[redacted]")
     return text
+
+# A "still want HIIT?" question left unanswered this long becomes the suggested plan.
+CONSULT_TTL_MIN = 120

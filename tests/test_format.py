@@ -16,7 +16,7 @@ from today import fixtures_now
 TARGETS = {"targets": {"calories": 2218, "protein_g": 126, "carbs_g": 290, "fat_g": 62, "fiber_g": 31},
            "inputs": {}, "reason": None}
 REMAINING = {"calories": 1838, "protein_g": 101, "carbs_g": 262, "fiber_g": 26}
-INTERNAL = re.compile(r"\b[a-z]+_[a-z_]+\b|\bnull\b|\bwindow\b", re.I)
+INTERNAL = re.compile(r"\b[a-z]+_[a-z_]+\b|\bnull\b|\bwindow\b|\bfloor\b", re.I)
 DONE = 'Reply "done" when you finish, or I\'ll mark it from Oura if it records it.'
 
 
@@ -167,11 +167,11 @@ def test_tool_texts_and_confirmations_are_plain(coach, chat_model, user):
     """Every code-built text the agent sends (question, plan, why) and the confirmations stay plain."""
     at = lambda h, m=0: fixtures_now(time(h, m))  # noqa: E731
     turns = [
-        ("want to work out", [call("start_checkin"), say("")]),
-        ("2 3 tired", [call("submit_checkin", energy=2, soreness=3, comment="tired"), say("")]),
+        ("want to work out", [call("start_checkin", request_text=None), say("")]),
+        ("2 3 tired", [call("submit_checkin", answer="2 3 tired"), say("")]),
         ("why?", [call("explain_plan"), say("")]),
         ("had poha", [call("log_food", text="poha", time_text=None), say("Logged poha: about 450 kcal, 20 g protein.")]),
-        ("done, felt great", [call("mark_done", feeling="great", time_text=None), say("Nice work, walk marked done.")]),
+        ("done, felt great", [call("mark_done", feeling="great"), say("Oura doesn't have that walk yet. When did you do it?")]),
         ("went for a 30 min walk at 6", [call("add_manual_workout", workout_type="walk", minutes=30,
                                               start_time_text="at 6", feeling=None), say("Added a 30-minute walk at 6am.")]),
     ]
@@ -186,3 +186,55 @@ def test_why_with_old_string_overrides_still_works(temp_db):
     db.finish_plan(session_id, {}, plan(), plan(), ["Old plain override text."], {})
     text = format_why(db.get_plan(session_id))
     assert "Old plain override text." in text and "Check-in: skipped" in text
+
+
+# --- several blocks, the consult question (M3.2 Phase 3) -------------------------------
+
+from modules.training.messages import format_consult  # noqa: E402
+
+RUN_THEN_LEGS = [{"workout_type": "easy_run", "intensity": 3, "duration_min": 20},
+                 {"workout_type": "strength", "intensity": 3, "duration_min": 30}]
+
+
+def test_two_block_message_golden():
+    final = plan(workout_type="easy_run", intensity=3, time_slot="07:00-07:50", duration_min=50, split_day="Legs",
+                 blocks=RUN_THEN_LEGS, why="Fresh legs and good readiness, so a run, then legs.")
+    assert format_plan(state(final)) == "\n".join([
+        "🔋 Readiness 82",
+        "🏃 Easy run 20 min + 🏋️ Strength (Legs) 30 min · 7:00–7:50am",
+        "Today: 2218 kcal · 126g protein",
+        "",
+        "Why: Fresh legs and good readiness, so a run, then legs.",
+        "",
+        "🍽 Before: A banana or 2 dates 30 minutes before",
+        "After: Paneer bhurji with 2 rotis to cover most of the protein left",
+        "",
+        DONE,
+    ])
+
+
+def test_consult_questions_are_plain():
+    floor = {"rule": "readiness_floor", "plain": "Readiness is 64 today, lower than usual, so I'd keep it light.",
+             "changes_type": True}
+    band = {"rule": "band", "plain": "Readiness is 64 today, too low for a hard day. So keep it light today.",
+            "changes_type": True}
+    question = format_consult([{"workout_type": "HIIT", "duration_min": None},
+                               {"workout_type": "strength", "duration_min": 30}],
+                              [{"workout_type": "walk", "duration_min": 60}], [floor, band, floor])
+    assert question == ("Readiness is 64 today, lower than usual, so I'd keep it light.\n"
+                        "I'd suggest a 60-min walk instead. Still want HIIT, then 30 min of strength?")
+    assert_plain(question)
+
+
+def test_why_for_a_two_block_plan_shows_each_block_done_state(temp_db):
+    plan_id = db.start_plan(1, date(2026, 10, 7), "t", datetime(2026, 10, 7, 7, tzinfo=TZ))
+    final = plan(workout_type="easy_run", intensity=3, time_slot="07:00-07:50", duration_min=50, split_day="Legs",
+                 blocks=RUN_THEN_LEGS)
+    db.finish_plan(plan_id, {}, final, final, [], {})
+    db.mark_block_done(plan_id, 0, datetime(2026, 10, 7, 7, 2, tzinfo=TZ), datetime(2026, 10, 7, 7, 21, tzinfo=TZ),
+                       19, "oura", datetime(2026, 10, 7, 7, 21, tzinfo=TZ))
+    text = format_why(db.get_plan(plan_id))
+    assert text.startswith("Your 7:00am plan: Easy run 20 min + Strength (Legs) 30 min · 7:00–7:50am\n"
+                           "Done: Easy run 7:02–7:21am (from Oura); Strength (Legs) not yet")
+    assert_plain(text)
+    assert db.get_plan(plan_id)["completed"] is None                         # one block left

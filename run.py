@@ -1,19 +1,23 @@
 """Run one check-in in the terminal (the same graph the Telegram bot uses).
 
 Usage: python run.py [--fixtures [--simulate-hard-yesterday]] [--at HH:MM] [--energy N] [--soreness N]
+                     [--request "45 min HIIT" [--choose yes|no]]
 Food is logged separately with: python log_food.py "what you had"
 
-The check-in comes from --energy/--soreness (in chat, the agent asks it first).
+The check-in comes from --energy/--soreness (in chat, the agent asks it first). --request is what they
+asked for (read by the check-in parser, an LLM call). If the rules would change it, the run prints the
+question it would ask; --choose answers it in the same run.
 """
 import argparse
 from datetime import datetime, time, timedelta
 
 from connectors.manual import ManualSource
 from core import db, users
+from modules.training import checkin
 from modules.nutrition.messages import format_food_today, format_remaining, format_targets
 from modules.training.messages import format_activity
 from core.config import DEMO_DB_PATH, OPENAI_MODEL, TZ
-from modules.training.planner import build_graph, run_plan
+from modules.training.planner import answer_consult, build_graph, run_plan
 from today import fixtures_now
 
 LABELS = {
@@ -81,8 +85,14 @@ def print_report(state: dict, demo: bool) -> None:
         print("Remembered: " + "; ".join(c["saved_memory"]))
 
     split = f" ({final['split_day']})" if final.get("split_day") else ""
+    if state.get("request"):
+        asked = " + ".join(f"{b['workout_type']} {b['duration_min'] or '?'} min" for b in state["request"])
+        print(f"\nRequested: {asked}" + (f"  (their answer to the question: {state['decision']})"
+                                          if state.get("decision") else ""))
     print(f"\nWorkout:   {final['workout_type']}{split}  (intensity {final['intensity']}/5)"
           f"  [{state['plan_source']} plan]")
+    for b in final.get("blocks") or []:
+        print(f"           - {b['workout_type']} {b['duration_min']} min (intensity {b['intensity']}/5)")
     print(f"When:      {final['time_slot']}  ({final['duration_min']} min)")
     for n, e in enumerate(final["exercises"], 1):
         print(f"           {n}. {e['name']} · {e['sets_reps']}")
@@ -118,9 +128,14 @@ def main(argv: list[str] | None = None) -> dict:
     parser.add_argument("--soreness", type=int, choices=range(0, 6), help="0 (none) to 5 (very sore)")
     parser.add_argument("--simulate-hard-yesterday", action="store_true",
                         help="demo only (needs --fixtures): log a done HIIT session for yesterday in demo.db")
+    parser.add_argument("--request", metavar="TEXT", help='the workout they asked for, e.g. "45 min HIIT"')
+    parser.add_argument("--choose", choices=["yes", "no"],
+                        help="the answer if the rules would change the request (yes = the request, no = the suggestion)")
     args = parser.parse_args(argv)
     if args.simulate_hard_yesterday and not args.fixtures:
         parser.error("--simulate-hard-yesterday is only allowed with --fixtures")
+    if args.choose and not args.request:
+        parser.error("--choose answers the question about a --request")
 
     if args.fixtures:
         db.set_db_path(DEMO_DB_PATH)
@@ -132,10 +147,21 @@ def main(argv: list[str] | None = None) -> dict:
     db.init_db()
     user = users.default()
     simulated = simulate_hard_yesterday(user, now) if args.simulate_hard_yesterday else None
-    answer = {"energy": args.energy, "soreness": args.soreness, "note": None, "label": "from the command line"}
+    answer = {"energy": args.energy, "soreness": args.soreness, "note": args.request, "constraints": [],
+              "label": "from the command line"}
+    app = build_graph()
     try:
-        state = run_plan(build_graph(), user, now, args.fixtures, answer,
-                         hide_history_from_llm=args.simulate_hard_yesterday)
+        request = checkin.parse("", args.request, user.id)["request"] if args.request else None
+        state = run_plan(app, user, now, args.fixtures, answer, hide_history_from_llm=args.simulate_hard_yesterday,
+                         request=request)
+        if state.get("consult"):
+            print(f"\nThe coach asks first:\n{state['consult']}")
+            if not args.choose:
+                print("\n(Answer with --choose yes or --choose no.)")
+                return state
+            print(f"Answer: {args.choose}")
+            state = answer_consult(app, user, now, args.fixtures, db.pending_confirm(user.id), args.choose,
+                                   hide_history_from_llm=args.simulate_hard_yesterday)
     finally:
         if simulated:
             db.delete_manual_workout(simulated)

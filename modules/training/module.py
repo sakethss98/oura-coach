@@ -1,12 +1,15 @@
 """The training module: check-ins, workout plans for right now, done workouts, hard-day rules.
 
-Tools: modules/training/tools.py. Score arrives in M3.2 Phase 3.
+Tools: modules/training/tools.py. Score: modules/training/score.py.
 """
 from datetime import date
 
+from connectors.health import Health
 from core import db
-from core.labels import workout_label
+from core.labels import clock, workout_label
 from modules.base import NudgeSpec, ScoreComponent
+from modules.training.blocks import blocks_of
+from modules.training.score import score_day
 
 
 class TrainingModule:
@@ -29,10 +32,15 @@ class TrainingModule:
         pending = db.pending_plan(user.id)
         if pending and pending["date"] == day.isoformat():
             lines.append("A check-in question (energy and soreness) is waiting for an answer.")
+        consult = db.pending_confirm(user.id)
+        if consult:
+            r = consult["requested_json"]
+            lines.append(f"Waiting for yes or no (confirm_override), asked at {clock(r['asked_at'][11:16])}: "
+                         f"{r['question']!r}")
         latest = db.latest_planned(user.id, day)
         if latest:
             plan = latest["plan_json"] or {}
-            label = workout_label(plan.get("workout_type", "other"), plan.get("split_day"))
+            label = " + ".join(workout_label(b["workout_type"], plan.get("split_day")) for b in blocks_of(plan))
             status = "done" if latest["completed"] == 1 else "not done yet"
             lines.append(f"Latest plan today: {label}, {plan.get('duration_min', 0)} min ({status}).")
         else:
@@ -46,7 +54,13 @@ class TrainingModule:
                           "Nice work, I saw your workout. How did it feel?")]
 
     def score(self, user, day: date) -> ScoreComponent:
-        raise NotImplementedError("Training score arrives in M3.2 Phase 3")
+        """Did the day's plan happen (modules/training/score.py)? Marks what Oura recorded first."""
+        import today   # the shared day view (root module); imported here so loading the module stays light
+        rules = user.goals()["activity"]
+        bundle = (self.health or Health()).bundle(user, day)
+        today.sync_oura_completions(user, day, bundle["workouts_by_day"], rules)
+        items = today.day_activity(user, day, bundle, rules)[day.isoformat()]
+        return score_day(db.plans_between(user.id, day, day), items, rules)
 
     def help_lines(self) -> list[str]:
         return ['"want to work out now": I ask how you feel, then plan a workout for right now',

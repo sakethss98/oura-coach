@@ -9,6 +9,7 @@ system message every turn. The LLM decides what to do; numbers, rules and plan m
 Who and when (user_id, now, session_id, use_fixtures) come from the run config, never from the state.
 """
 import re
+from datetime import timedelta
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
@@ -17,7 +18,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 
 from connectors.health import Health
 from core import db, memory, reply_rules
-from core.config import OPENAI_MODEL
+from core.config import CONSULT_TTL_MIN, OPENAI_MODEL
 from core.day import day_of
 from core.llm import load_prompt
 from core.tools import CORE_TOOLS, turn
@@ -29,7 +30,8 @@ EXPIRED_CHECKIN = "Still want to check in today?"
 NO_REPLY = "Could you say that another way?"
 HISTORY_HUMAN_TURNS = 5      # the agent sees the conversation from the 5th-last message they sent (~10 messages)
 # Tools that change something. When one of them ran next to a tool whose text is sent as is,
-# the agent's own line (e.g. "Logged 2 eggs.") is sent too.
+# the agent's own line (e.g. "Logged 2 eggs.", or the answer to the rest of "done, what should I eat?")
+# is sent too, after the code-built text.
 WRITE_TOOLS = {"log_food", "remove_food", "remember", "forget", "add_manual_workout", "mark_done"}
 
 
@@ -88,6 +90,8 @@ def _trace(messages: list) -> list[dict]:
 
 def ingest(state: AgentState, config) -> dict:
     t = turn(config)
+    # A "still want HIIT?" question lasts 2 hours, across sessions; unanswered, it expires with no plan.
+    db.expire_consults(t.user.id, t.now, timedelta(minutes=CONSULT_TTL_MIN))
     pending = db.pending_plan(t.user.id)
     expired = False
     if pending and pending["chat_session_id"] != t.session_id:
@@ -147,9 +151,10 @@ def respond(state: AgentState, config) -> dict:
 
     parts = []
     if verbatim:
-        if draft and tools_called & WRITE_TOOLS:
+        parts += verbatim                       # code-built text first, exactly as built
+        repeats = any(draft and draft in v for v in verbatim)
+        if draft and tools_called & WRITE_TOOLS and not repeats:
             parts.append(_within_rules(draft, tools_called, t))
-        parts += verbatim
     elif draft:
         parts.append(_within_rules(draft, tools_called, t))
     reply = "\n\n".join(p for p in parts if p) or NO_REPLY

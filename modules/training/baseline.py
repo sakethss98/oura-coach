@@ -72,7 +72,7 @@ def readiness_band(comparison: dict, readiness_floor: int) -> dict:
 
     if readiness is not None and readiness < readiness_floor:
         return {"band": "recover", "reason": f"readiness {readiness} is below the floor of {readiness_floor}",
-                "plain": f"Your readiness is {readiness}, below your floor of {readiness_floor}."}
+                "plain": f"Readiness is {readiness} today, too low for a hard day."}
     if len(worse) >= 2:
         return {"band": "recover", "reason": f"{len(worse)} metrics worse than baseline: {', '.join(worse)}",
                 "plain": f"Your {_plain_list(worse)} are worse than usual."}

@@ -52,3 +52,25 @@ def clock_range(start, end) -> str:
     """"18:30", "19:00" -> "6:30–7:00pm"; across noon -> "11:30am–12:15pm"."""
     same_half = (_parts(start)[0] < 12) == (_parts(end)[0] < 12)
     return f"{clock(start, with_suffix=not same_half)}–{clock(end)}"
+
+
+# Workout names inside a sentence ("I'd suggest a 45-min walk instead. Still want HIIT?").
+PHRASE_NOUNS = {"HIIT": "HIIT", "easy_run": "easy run", "long_run": "long run", "strength": "strength",
+                "walk": "walk", "mobility": "mobility", "rest": "rest", "yoga": "yoga", "other": "workout"}
+COUNTABLE = {"easy_run", "long_run", "walk", "other"}   # "a walk", but "HIIT", "strength"
+
+
+def workout_phrase(workout_type: str, minutes: int | None = None) -> str:
+    """"walk", 45 -> "a 45-min walk"; "HIIT", 45 -> "45 min of HIIT"; "easy_run" -> "an easy run"."""
+    noun = PHRASE_NOUNS.get(workout_type, workout_type.replace("_", " "))
+    if workout_type in COUNTABLE:
+        if minutes:
+            return f"a {minutes}-min {noun}"
+        return ("an " if noun[0] in "aeiou" else "a ") + noun
+    return f"{minutes} min of {noun}" if minutes else noun
+
+
+def blocks_phrase(blocks: list[dict], with_minutes: bool = True) -> str:
+    """Several blocks in order: "a 20-min easy run, then 30 min of strength"."""
+    return ", then ".join(workout_phrase(b["workout_type"], b.get("duration_min") if with_minutes else None)
+                          for b in blocks)

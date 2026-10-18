@@ -1,3 +1,4 @@
+import copy
 import json
 import sys
 import uuid
@@ -17,7 +18,8 @@ from core.config import DB_PATH, FIXTURES_DIR  # noqa: E402
 from modules.nutrition import food  # noqa: E402
 from modules.nutrition.schemas import FoodEstimate  # noqa: E402
 from modules.training import planner as graph  # noqa: E402
-from modules.training.schemas import Plan  # noqa: E402
+from modules.training import checkin  # noqa: E402
+from modules.training.schemas import Block, CheckinParse, Plan, Request  # noqa: E402
 import today  # noqa: E402
 
 needs_fixtures = pytest.mark.skipif(
@@ -40,21 +42,34 @@ def user(temp_db):
     return users.default()
 
 
+def parsed_checkin(energy=None, soreness=None, blocks=(), feeling=None, constraints=()) -> CheckinParse:
+    """A check-in answer as the LLM would read it; blocks = [(workout_type, minutes | None), ...]."""
+    request = Request(blocks=[Block(workout_type=t, duration_min=m) for t, m in blocks]) if blocks else None
+    return CheckinParse(energy=energy, soreness=soreness, request=request, feeling=feeling,
+                        constraints=list(constraints))
+
+
 class FakeLLM:
-    """Stands in for llm.structured_call (plan, food): canned answers by call kind, every call recorded."""
+    """Stands in for llm.structured_call (plan, food, checkin): canned answers by call kind, every call recorded."""
 
     def __init__(self):
         self.plan = Plan(workout_type="HIIT", intensity=5, time_slot="07:00-07:40", duration_min=40,
                          why="Your readiness looks good, so let's push.", reasoning="stub reasoning",
                          food_before="A banana 30 minutes before", food_after="Paneer bhurji with 2 rotis",
-                         follow_up="", exercises=[], rules_applied=[])
+                         follow_up="", exercises=[], rules_applied=[], blocks=[])
+        self.checkin = parsed_checkin(4, 2)
         self.food_calories = 450.0
         self.calls: list[tuple[str, str]] = []
+
+    def kinds(self) -> list[str]:
+        return [kind for kind, _ in self.calls]
 
     def __call__(self, kind, schema, system, user, user_id=None):
         self.calls.append((kind, user))
         if kind == "plan":
             return self.plan
+        if kind == "checkin":
+            return self.checkin
         if kind == "food":
             return FoodEstimate(entry_type="meal", est_protein_g=20, est_fiber_g=6, est_carbs_g=60,
                                 est_calories=self.food_calories, est_caffeine_mg=0, alcohol_drinks=0,
@@ -65,9 +80,31 @@ class FakeLLM:
 @pytest.fixture
 def fake_llm(monkeypatch):
     fake = FakeLLM()
-    for module in (graph, food):
+    for module in (graph, food, checkin):
         monkeypatch.setattr(module, "structured_call", fake)
     return fake
+
+
+@pytest.fixture
+def patch_oura(monkeypatch):
+    """Edit the loaded fixtures for one test: `patch_oura(readiness=64, workouts=[("running", "12:12", "13:03")])`.
+    Added workouts copy the shape of a real fixtures/workout.json record (same keys), on the fixtures' today.
+    Call it before the first Oura read of the test (reads are cached)."""
+    from connectors import oura as oura_connector
+    raw = copy.deepcopy(oura_connector.load_fixtures())
+    day = oura_connector.latest_day(raw).isoformat()
+    monkeypatch.setattr(oura_connector, "load_fixtures", lambda: raw)
+
+    def apply(readiness=None, workouts=()):
+        if readiness is not None:
+            next(r for r in raw["daily_readiness"]["data"] if r["day"] == day)["score"] = readiness
+        template = raw["workout"]["data"][0]
+        for n, (activity, start, end) in enumerate(workouts):
+            raw["workout"]["data"].append({**template, "id": f"test-workout-{n}", "activity": activity, "day": day,
+                                           "intensity": "moderate", "start_datetime": f"{day}T{start}:00.000-05:00",
+                                           "end_datetime": f"{day}T{end}:00.000-05:00"})
+        return raw
+    return apply
 
 
 @pytest.fixture

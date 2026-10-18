@@ -33,3 +33,24 @@ def test_simulate_hard_yesterday_triggers_override_and_cleans_up(temp_demo, fake
     assert "yesterday_hard" not in fake_llm.calls[-1][1]              # hidden from the LLM
     with db.connect() as conn:                                        # simulated workout deleted
         assert conn.execute("SELECT COUNT(*) FROM manual_workouts").fetchone()[0] == 0
+
+
+def test_a_request_the_rules_change_prints_the_question_and_choose_answers_it(temp_demo, fake_llm, capsys):
+    from tests.conftest import parsed_checkin
+    fake_llm.checkin = parsed_checkin(blocks=[("HIIT", 45)])
+    state = run.main(["--fixtures", "--at", "07:00", "--simulate-hard-yesterday", "--request", "45 min HIIT"])
+    assert state["consult"].endswith("Still want 45 min of HIIT?")
+    assert "--choose yes" in capsys.readouterr().out
+
+    state = run.main(["--fixtures", "--at", "07:00", "--simulate-hard-yesterday", "--request", "45 min HIIT",
+                      "--choose", "yes"])
+    assert state["final_plan"]["workout_type"] == "HIIT"
+    assert {o["skipped"] for o in state["overrides"] if o["rule"] == "user_choice"} == {"back_to_back"}
+    state = run.main(["--fixtures", "--at", "07:00", "--simulate-hard-yesterday", "--request", "45 min HIIT",
+                      "--choose", "no"])
+    assert state["final_plan"]["workout_type"] == "easy_run"
+
+
+def test_late_run_is_rest_without_an_llm_call(temp_demo, fake_llm):
+    state = run.main(["--fixtures", "--at", "22:30"])
+    assert state["final_plan"]["workout_type"] == "rest" and fake_llm.calls == []

@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS plans (
     date             TEXT NOT NULL,      -- YYYY-MM-DD (core.day.day_of at check-in time)
     checkin_at       TEXT,               -- ISO local time the check-in started
     thread_id        TEXT,               -- LangGraph thread of the planner run
-    status           TEXT NOT NULL,      -- awaiting_checkin / awaiting_confirm / planned / abandoned
+    status           TEXT NOT NULL,      -- awaiting_checkin / awaiting_confirm / planned / abandoned / expired
     source           TEXT NOT NULL,      -- planned (kept for older rows)
     energy           INTEGER,            -- 1-5, NULL = not answered
     soreness         INTEGER,            -- 0-5, NULL = not answered
@@ -84,9 +84,20 @@ CREATE TABLE IF NOT EXISTS plans (
     done_at          TEXT,               -- ISO local time it was reported done
     actual_start     TEXT,               -- ISO local, from Oura when it recorded the workout
     actual_end       TEXT,
-    done_by          TEXT,               -- chat / oura (who marked it done)
+    done_by          TEXT,               -- chat / oura / mixed (who marked it done)
     details_json     TEXT,               -- numbers and reasons behind the plan
-    requested_json   TEXT                -- what the check-in comment asked for
+    requested_json   TEXT                -- what they asked for, and a pending consult (training planner)
+);
+
+CREATE TABLE IF NOT EXISTS plan_blocks_done (
+    plan_id      INTEGER NOT NULL,
+    block_index  INTEGER NOT NULL,       -- position in plan_json.blocks (0 for a single-block plan)
+    start        TEXT NOT NULL,          -- ISO local
+    end          TEXT NOT NULL,
+    minutes      INTEGER NOT NULL,
+    done_by      TEXT NOT NULL,          -- oura / chat
+    created_at   TEXT NOT NULL,
+    PRIMARY KEY (plan_id, block_index)
 );
 
 CREATE TABLE IF NOT EXISTS manual_workouts (
@@ -484,21 +495,37 @@ def _plan(row) -> dict | None:
     return p
 
 
+def _with_blocks_done(conn, plans: list[dict]) -> list[dict]:
+    """Each plan gets `blocks_done`: {block_index: {start, end, minutes, done_by}} (empty if none)."""
+    for p in plans:
+        rows = conn.execute("SELECT * FROM plan_blocks_done WHERE plan_id = ? ORDER BY block_index",
+                            (p["id"],)).fetchall()
+        p["blocks_done"] = {r["block_index"]: {k: r[k] for k in ("start", "end", "minutes", "done_by")}
+                            for r in rows}
+    return plans
+
+
 def _plans(conn, where: str, params: tuple, order: str = "id") -> list[dict]:
     rows = conn.execute(f"SELECT * FROM plans WHERE {where} ORDER BY {order}", params).fetchall()
-    return [_plan(r) for r in rows]
+    return _with_blocks_done(conn, [_plan(r) for r in rows])
 
 
 def start_plan(user_id: int, day: date, thread_id: str, checkin_at: datetime,
-               chat_session_id: int | None = None) -> int:
-    """Open a check-in. Any older check-in of this user still waiting for an answer is abandoned."""
+               chat_session_id: int | None = None, requested: dict | None = None, replace_open: bool = True) -> int:
+    """Open a check-in. It replaces any older check-in or question waiting for an answer and, with
+    `replace_open`, the day's plans with nothing done yet (a new check-in means a new plan)."""
     with connect() as conn:
-        conn.execute("UPDATE plans SET status = 'abandoned' WHERE user_id = ? AND status = 'awaiting_checkin'",
-                     (user_id,))
+        conn.execute("UPDATE plans SET status = 'abandoned' WHERE user_id = ? "
+                     "AND status IN ('awaiting_checkin', 'awaiting_confirm')", (user_id,))
+        if replace_open:
+            conn.execute("UPDATE plans SET status = 'abandoned' WHERE user_id = ? AND date = ? AND status = 'planned' "
+                         "AND completed IS NULL AND id NOT IN (SELECT plan_id FROM plan_blocks_done)",
+                         (user_id, day.isoformat()))
         cur = conn.execute(
-            "INSERT INTO plans (user_id, chat_session_id, date, checkin_at, thread_id, status, source) "
-            "VALUES (?, ?, ?, ?, ?, 'awaiting_checkin', 'planned')",
-            (user_id, chat_session_id, day.isoformat(), _iso(checkin_at), thread_id),
+            "INSERT INTO plans (user_id, chat_session_id, date, checkin_at, thread_id, status, source, requested_json) "
+            "VALUES (?, ?, ?, ?, ?, 'awaiting_checkin', 'planned', ?)",
+            (user_id, chat_session_id, day.isoformat(), _iso(checkin_at), thread_id,
+             json.dumps(requested) if requested else None),
         )
     return cur.lastrowid
 
@@ -534,7 +561,46 @@ def finish_plan(plan_id: int, checkin: dict, plan: dict, llm_plan: dict, overrid
 
 def get_plan(plan_id: int) -> dict | None:
     with connect() as conn:
-        return _plan(conn.execute("SELECT * FROM plans WHERE id = ?", (plan_id,)).fetchone())
+        found = _plans(conn, "id = ?", (plan_id,))
+    return found[0] if found else None
+
+
+# --- a consult: "…I'd suggest a walk instead. Still want HIIT?" ----------------
+
+def ask_confirm(plan_id: int, checkin: dict, requested: dict) -> None:
+    """The plan they asked for breaks a rule: wait for their yes or no (requested_json holds the
+    request and the code-built suggestion, so the question can expire without an LLM call)."""
+    with connect() as conn:
+        conn.execute("UPDATE plans SET status = 'awaiting_confirm', energy = ?, soreness = ?, note = ?, "
+                     "requested_json = ? WHERE id = ?",
+                     (checkin.get("energy"), checkin.get("soreness"), checkin.get("note"),
+                      json.dumps(requested, default=str), plan_id))
+
+
+def pending_confirm(user_id: int) -> dict | None:
+    """The consult question waiting for a yes or no, if any (at most one)."""
+    with connect() as conn:
+        found = _plans(conn, "user_id = ? AND status = 'awaiting_confirm'", (user_id,), "id DESC LIMIT 1")
+    return found[0] if found else None
+
+
+def expire_consults(user_id: int, now: datetime, ttl: timedelta) -> list[dict]:
+    """Questions unanswered for `ttl` expire: status `expired`, no plan is made, nothing is sent, and
+    nothing counts toward the score (only `planned` rows do). Returns them."""
+    with connect() as conn:
+        waiting = _plans(conn, "user_id = ? AND status = 'awaiting_confirm'", (user_id,))
+        expired = [p for p in waiting if now - datetime.fromisoformat(p["requested_json"]["asked_at"]) >= ttl]
+        for p in expired:
+            conn.execute("UPDATE plans SET status = 'expired' WHERE id = ?", (p["id"],))
+    return expired
+
+
+def expired_consult(user_id: int, day: date) -> dict | None:
+    """The day's latest question that expired unanswered, if any."""
+    with connect() as conn:
+        found = _plans(conn, "user_id = ? AND date = ? AND status = 'expired'", (user_id, day.isoformat()),
+                       "id DESC LIMIT 1")
+    return found[0] if found else None
 
 
 def latest_open_plan(user_id: int, day: date) -> dict | None:
@@ -561,9 +627,10 @@ def open_plans(user_id: int, day: date) -> list[dict]:
 
 
 def done_strength_plans(user_id: int) -> list[dict]:
-    """Done strength plans, oldest first (for the split rotation)."""
+    """Plans with strength in them and something done, oldest first (for the split rotation)."""
     with connect() as conn:
-        return _plans(conn, "user_id = ? AND completed = 1 AND json_extract(plan_json, '$.workout_type') = 'strength'",
+        return _plans(conn, "user_id = ? AND status = 'planned' AND plan_json LIKE '%\"strength\"%' "
+                            "AND (completed = 1 OR id IN (SELECT plan_id FROM plan_blocks_done))",
                       (user_id,), "date, id")
 
 
@@ -582,8 +649,37 @@ def count_planned(user_id: int, day: date) -> int:
                             (user_id, day.isoformat())).fetchone()[0]
 
 
+def mark_block_done(plan_id: int, block_index: int, start: datetime, end: datetime, minutes: int,
+                    done_by: str, done_at: datetime, feeling: str | None = None) -> None:
+    """One block of a plan is done (a block already done keeps its first record). When every block
+    is, the plan is completed: actual_start/end span the blocks, done_by is oura, chat or mixed."""
+    with connect() as conn:
+        conn.execute("INSERT OR IGNORE INTO plan_blocks_done (plan_id, block_index, start, end, minutes, done_by, "
+                     "created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                     (plan_id, block_index, _iso(start), _iso(end), minutes, done_by, _stamp()))
+        if feeling:
+            conn.execute("UPDATE plans SET feeling = ? WHERE id = ?", (feeling, plan_id))
+        plan = _plans(conn, "id = ?", (plan_id,))[0]
+        blocks = (plan["plan_json"] or {}).get("blocks") or [None]
+        done = plan["blocks_done"]
+        if len(done) < len(blocks):
+            return
+        by = {d["done_by"] for d in done.values()}
+        starts = [datetime.fromisoformat(d["start"]) for d in done.values()]
+        ends = [datetime.fromisoformat(d["end"]) for d in done.values()]
+        conn.execute("UPDATE plans SET completed = 1, done_at = ?, actual_start = ?, actual_end = ?, done_by = ? "
+                     "WHERE id = ?", (_iso(done_at), _iso(min(starts)), _iso(max(ends)),
+                                      by.pop() if len(by) == 1 else "mixed", plan_id))
+
+
+def set_feeling(plan_id: int, feeling: str) -> None:
+    with connect() as conn:
+        conn.execute("UPDATE plans SET feeling = ? WHERE id = ?", (feeling, plan_id))
+
+
 def mark_done(plan_id: int, feeling: str | None, done_at: datetime,
               actual_start: datetime | None, actual_end: datetime | None, done_by: str = "chat") -> None:
+    """The whole plan done at once, without per-block records (older rows and tests)."""
     with connect() as conn:
         conn.execute(
             "UPDATE plans SET completed = 1, feeling = ?, done_at = ?, actual_start = ?, actual_end = ?, "
