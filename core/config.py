@@ -19,9 +19,6 @@ FIXTURES_DIR = ROOT / "fixtures"
 PROMPTS_DIR = ROOT / "prompts"
 GOALS_PATH = ROOT / "goals.yaml"
 
-# The only place the default model name appears. Override with OPENAI_MODEL in .env.
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini")
-
 # Free-slot search window (local time) and minimum useful slot length.
 DAY_START_HOUR = 6
 DAY_END_HOUR = 21

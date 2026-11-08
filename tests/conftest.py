@@ -95,7 +95,7 @@ JUDGE = ("You check one reply from a coaching chatbot. The only question: did th
 def judge(message: str, reply: str) -> Verdict:
     """The yes/no rubric from docs/scenarios.md (a real model call; live tests only)."""
     from core.llm import structured_call
-    return structured_call("judge", Verdict, JUDGE, f"They wrote: {message}\nThe reply: {reply}")
+    return structured_call("judge", Verdict, JUDGE, f"They wrote: {message}\nThe reply: {reply}", job="judge")
 
 
 class Pushback(BaseModel):
@@ -114,7 +114,8 @@ PUSHBACK_JUDGE = ("You check one reply from a running and nutrition coach. The p
 def judge_pushback(message: str, reply: str) -> Pushback:
     """The pushback rubric (docs/scenarios.md M4-8..10): noticed, honest call, options, their choice, no guilt."""
     from core.llm import structured_call
-    return structured_call("judge", Pushback, PUSHBACK_JUDGE, f"They wrote: {message}\nThe reply: {reply}")
+    return structured_call("judge", Pushback, PUSHBACK_JUDGE, f"They wrote: {message}\nThe reply: {reply}",
+                           job="judge")
 
 
 @pytest.fixture
@@ -264,7 +265,7 @@ class ScriptedChat(BaseChatModel):
 @pytest.fixture
 def chat_model(monkeypatch):
     model = ScriptedChat()
-    monkeypatch.setattr(agent, "make_model", lambda: model)
+    monkeypatch.setattr(agent, "make_model", lambda override=None: model)
     return model
 
 

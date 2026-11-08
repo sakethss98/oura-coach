@@ -33,7 +33,7 @@ Python 3.11+, LangGraph (langgraph, langgraph-checkpoint-sqlite), langchain-open
 - Calendar recurrence is expanded with `recurring-ical-events`.
 - Free slots: gaps of at least 30 min within 06:00–21:00 America/Chicago. All-day events are listed for information and do not block slots. Events marked "free" (TRANSP:TRANSPARENT) are ignored.
 - fixtures/ is gitignored (personal health data). fixtures/calendar.ics holds the raw feed content (saved by the smoke test), never the URL.
-- Model: `OPENAI_MODEL` env var, default `gpt-5-mini`, set only in `config.py`. No temperature is set (gpt-5 models reject non-default values).
+- **Models (M4 Part B):** `config/models.yaml` maps each job to a provider + model: classifier, agent, structured (`core/llm.structured_call`), judge (gpt-5), embeddings (text-embedding-3-small), template_draft (declared, unused). `core/models.py` is the only place models are made. Precedence: a skill file's `model` (agent only) > `OPENAI_MODEL` in .env (classifier, agent, structured, as before) > models.yaml. Prices per model live in models.yaml (USD per 1M tokens, checked 2026-11-08); `models.cost`. Every `runs` row records kind, job, model, input/output tokens and latency. No temperature is set (gpt-5 models reject non-default values).
 - LLM proposes, code enforces: `policy.py` applies the hard rules after the LLM plan and records every override. Code computes all numbers, times, dates and rules; the LLM only proposes, explains and words things.
 - **Plan for now (M3):** every plan is for a workout starting now. Plan window (`calendar_client.plan_window`) = from now (or the end of the current event, chained through back-to-back events) until the next event or 21:00. A gap under 30 min jumps to the next free gap; nothing left = rest. The plan may start later inside the window; otherwise it moves to the window start; duration is clamped to the window. Rest = slot "none", 0 min. `preferred_time` in goals.yaml is no longer used for planning.
 - **Sessions table:** one row per check-in (status awaiting_checkin → planned, or abandoned) and per unplanned workout (status unplanned). Per-plan data (check-in, plan, LLM plan, overrides, completed, feeling, actual times) lives here; `daily_log` keeps day-level data only (metrics_json, food_targets_json).
@@ -155,6 +155,10 @@ Python 3.11+, LangGraph (langgraph, langgraph-checkpoint-sqlite), langchain-open
     - `pytest -q` (362 tests; `tests/test_history.py`, resolve_range in `tests/test_timeparse.py`, context_cap in `tests/test_policy.py`, M3.2→M4 in `tests/test_db_migration.py`)
     - `RUN_LIVE_LLM=1 pytest -q -s tests/test_replay.py -k "live and (m4 or 26)"`
     - `python -c "from core.config import check_keys; check_keys()"`
+  - Part B Model config: done (2026-11-08). config/models.yaml + core/models.py, runs gains job/tokens/latency (migration, backup first), `scripts/check_models.py` (one call per model, gpt-5 judge works on the key), `scripts/show_runs.py --last N [--brief]`. Verify:
+    - `pytest -q` (369 tests; `tests/test_models.py`)
+    - `python scripts/check_models.py`
+    - `python scripts/show_runs.py --last 1`
 - M5: not started.
 
 ## Oura data notes (observed in fixtures, 2026-10-07)

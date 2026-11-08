@@ -192,6 +192,8 @@ def m32_db(at_path):
     db.init_db()
     with sqlite3.connect(at_path) as conn:
         conn.execute("ALTER TABLE memory DROP COLUMN intensity_cap")
+        for column in ("job", "input_tokens", "output_tokens", "latency_ms"):
+            conn.execute(f"ALTER TABLE runs DROP COLUMN {column}")
         conn.execute("CREATE TABLE context_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, note TEXT NOT NULL, "
                      "start_date TEXT NOT NULL, end_date TEXT NOT NULL, created_at TEXT NOT NULL)")
         dates = (today.isoformat(), (today + timedelta(days=2)).isoformat())
@@ -209,6 +211,7 @@ def test_m32_database_is_backed_up_then_gets_the_m4_changes(m32_db):
     [backup] = backups(m32_db)
     assert "context_notes" in tables(backup) and "intensity_cap" not in columns(backup, "memory")
     assert "context_notes" not in tables(m32_db) and "intensity_cap" in columns(m32_db, "memory")
+    assert {"job", "input_tokens", "output_tokens", "latency_ms"} <= columns(m32_db, "runs")
     assert [m["text"] for m in db.list_memory(1)][-1] == "traveling, keep it light"   # facts kept
     assert all(m["intensity_cap"] is None for m in db.list_memory(1))                # no guessing from text
     db.init_db()

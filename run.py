@@ -12,11 +12,11 @@ import argparse
 from datetime import datetime, time, timedelta
 
 from connectors.manual import ManualSource
-from core import db, users
+from core import db, models, users
 from modules.training import checkin
 from modules.nutrition.messages import format_food_today, format_remaining, format_targets
 from modules.training.messages import format_activity
-from core.config import DEMO_DB_PATH, OPENAI_MODEL, TZ
+from core.config import DEMO_DB_PATH, TZ
 from modules.training.planner import answer_consult, build_graph, run_plan
 from today import fixtures_now
 
@@ -115,7 +115,7 @@ def print_report(state: dict, demo: bool) -> None:
             print(f"  - {o['text']}")
     else:
         print("\nPolicy check: passed, no changes.")
-    print(f"\n(model: {OPENAI_MODEL})")
+    print(f"\n(model: {models.model_name('structured')})")
 
 
 def main(argv: list[str] | None = None) -> dict:

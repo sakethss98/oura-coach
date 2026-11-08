@@ -10,16 +10,16 @@ system message every turn. The LLM decides what to do; numbers, rules and plan m
 Who and when (user_id, now, session_id, use_fixtures) come from the run config, never from the state.
 """
 import re
+import time
 from datetime import timedelta
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
-from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from connectors.health import Health
-from core import chat_sessions, db, memory, reply_rules, score
-from core.config import CONSULT_TTL_MIN, OPENAI_MODEL
+from core import chat_sessions, db, memory, models, reply_rules, score
+from core.config import CONSULT_TTL_MIN
 from core.day import day_of
 from core.labels import clock
 from core.llm import load_prompt
@@ -39,9 +39,17 @@ HISTORY_HUMAN_TURNS = 5      # the agent sees the conversation from the 5th-last
 WRITE_TOOLS = {"log_food", "edit_food", "remove_food", "remember", "forget", "add_manual_workout", "mark_done"}
 
 
-def make_model():
-    """The chat model (tests replace this function)."""
-    return ChatOpenAI(model=OPENAI_MODEL)
+def make_model(override: str | None = None):
+    """The agent's chat model (job `agent`; tests replace this function)."""
+    return models.chat("agent", override)
+
+
+def _log(kind: str, messages: list, output, t, response=None, started: float | None = None,
+         override: str | None = None) -> None:
+    input_tokens, output_tokens = models.usage(response)
+    db.log_run(kind, models.model_name("agent", override), _trace(messages), output, t.user.id, job="agent",
+               input_tokens=input_tokens, output_tokens=output_tokens,
+               latency_ms=round((time.perf_counter() - started) * 1000) if started else None)
 
 
 class AgentState(MessagesState):
@@ -157,8 +165,9 @@ def agent(state: AgentState, config) -> dict:
     t = turn(config)
     tools = CORE_TOOLS + [tool for m in enabled_modules(t.user) for tool in m.tools()]
     messages = [SystemMessage(system_prompt(t))] + recent(state["messages"])
+    started = time.perf_counter()
     response = make_model().bind_tools(tools).invoke(messages)
-    db.log_run("agent", OPENAI_MODEL, _trace(messages), _trace([response]), t.user.id)
+    _log("agent", messages, _trace([response]), t, response, started)
     return {"messages": [response]}
 
 
@@ -170,8 +179,10 @@ def _within_rules(draft: str, tools_called: set[str], t) -> str:
     request = (f"Rewrite this reply so it follows the rules. Problems: {'; '.join(problems)}. "
                f"Keep the facts, do not claim anything new. Reply with the text only.\n\n{draft}")
     messages = [SystemMessage(load_prompt("agent")), HumanMessage(request)]
-    rewrite = _text(make_model().invoke(messages).content)
-    db.log_run("agent_rewrite", OPENAI_MODEL, _trace(messages), {"content": rewrite}, t.user.id)
+    started = time.perf_counter()
+    response = make_model().invoke(messages)
+    rewrite = _text(response.content)
+    _log("agent_rewrite", messages, {"content": rewrite}, t, response, started)
     if rewrite and not reply_rules.violations(rewrite, tools_called):
         return rewrite
     return reply_rules.enforce(rewrite or draft, tools_called) or reply_rules.enforce(draft, tools_called)

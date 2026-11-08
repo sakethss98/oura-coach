@@ -1,0 +1,29 @@
+# Which model does which job (core/models.py). OPENAI_MODEL in .env, when set, overrides the model of
+# classifier, agent and structured (as it did before M4). A skill file's `model` overrides the agent's.
+jobs:
+  classifier:                   # picks the categories of each message (M4 Part C)
+    provider: openai
+    model: gpt-5-mini
+    params: {reasoning_effort: minimal}
+  agent:                        # the chat agent and its rewrite of a reply that broke the rules
+    provider: openai
+    model: gpt-5-mini
+  structured:                   # core/llm.structured_call: plan, food, check-in, meal, recipe ...
+    provider: openai
+    model: gpt-5-mini
+  judge:                        # yes/no rubric checks in tests and evals; a stronger model on purpose
+    provider: openai
+    model: gpt-5
+  embeddings:                   # the GSSI index (M4 Part D)
+    provider: openai
+    model: text-embedding-3-small
+  template_draft:               # declared for later (AI-drafted program templates); unused in M4
+    provider: openai
+    model: gpt-5-mini
+
+# USD per 1M tokens, standard tier, from developers.openai.com/api/docs/pricing (checked 2026-11-08).
+prices:
+  gpt-5-mini: {input: 0.25, output: 2.00}
+  gpt-5: {input: 1.25, output: 10.00}
+  gpt-5-nano: {input: 0.05, output: 0.40}
+  text-embedding-3-small: {input: 0.02, output: 0}

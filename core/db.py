@@ -196,10 +196,14 @@ CREATE TABLE IF NOT EXISTS runs (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id      INTEGER,
     created_at   TEXT NOT NULL,
-    kind         TEXT NOT NULL,          -- plan / food / router / answer / agent ...
+    kind         TEXT NOT NULL,          -- plan / food / checkin / agent / agent_rewrite / judge ...
     model        TEXT NOT NULL,
     input_json   TEXT NOT NULL,          -- messages sent to the LLM
-    output_json  TEXT                    -- parsed output (NULL if the call failed)
+    output_json  TEXT,                   -- parsed output (NULL if the call failed)
+    job          TEXT,                   -- config/models.yaml job: classifier / agent / structured / judge ...
+    input_tokens  INTEGER,
+    output_tokens INTEGER,
+    latency_ms    INTEGER
 )
 """
 
@@ -395,21 +399,30 @@ def _seed_first_user(conn) -> None:
                      (text, kind, _stamp()))
 
 
+RUNS_M4_COLUMNS = {"job": "TEXT", "input_tokens": "INTEGER", "output_tokens": "INTEGER", "latency_ms": "INTEGER"}
+
+
 def _m4_steps(conn) -> list[str]:
     """M3.2 -> M4 changes this database still needs (empty when it is current)."""
     tables, steps = _tables(conn), []
     if "memory" in tables and "intensity_cap" not in _columns(conn, "memory"):
         steps.append("memory.intensity_cap")
+    if "runs" in tables and set(RUNS_M4_COLUMNS) - _columns(conn, "runs"):
+        steps.append("runs.job/tokens/latency")
     if "context_notes" in tables:
         steps.append("drop context_notes")
     return steps
 
 
 def _m4_migrate(conn) -> None:
-    """M3.2 -> M4: memory gains intensity_cap; context_notes is dropped once every still-active note is
+    """M3.2 -> M4: memory gains intensity_cap, runs gains job/tokens/latency; context_notes is dropped once every still-active note is
     in memory (aborts otherwise, so no note is lost). Runs after SCHEMA, guarded step by step."""
     if "intensity_cap" not in _columns(conn, "memory"):
         conn.execute("ALTER TABLE memory ADD COLUMN intensity_cap INTEGER")
+    runs = _columns(conn, "runs")
+    for column, kind in RUNS_M4_COLUMNS.items():
+        if column not in runs:
+            conn.execute(f"ALTER TABLE runs ADD COLUMN {column} {kind}")
     if "context_notes" in _tables(conn):
         today = datetime.now(TZ).date().isoformat()
         missing = conn.execute(
@@ -1056,12 +1069,15 @@ def undo_last(user_id: int) -> dict | None:
 
 # --- LLM run traces ---------------------------------------------------------
 
-def log_run(kind: str, model: str, input_data, output_data, user_id: int | None = None) -> None:
+def log_run(kind: str, model: str, input_data, output_data, user_id: int | None = None, job: str | None = None,
+            input_tokens: int | None = None, output_tokens: int | None = None, latency_ms: int | None = None) -> None:
     with connect() as conn:
         conn.execute(
-            "INSERT INTO runs (user_id, created_at, kind, model, input_json, output_json) VALUES (?, ?, ?, ?, ?, ?)",
-            (user_id, _now(), kind, model, json.dumps(input_data),
-             None if output_data is None else json.dumps(output_data, default=str)),
+            "INSERT INTO runs (user_id, created_at, kind, model, input_json, output_json, job, input_tokens, "
+            "output_tokens, latency_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (user_id, _now(), kind, model, json.dumps(input_data, default=str),
+             None if output_data is None else json.dumps(output_data, default=str), job, input_tokens,
+             output_tokens, latency_ms),
         )
 
 
