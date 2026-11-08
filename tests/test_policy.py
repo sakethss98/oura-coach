@@ -350,3 +350,38 @@ def test_conflicts_are_type_changes_or_a_hard_day_made_easy_never_the_clock():
     asked = plan("easy_run", 3, "10:00-11:00", 60)                  # only the clock changed
     final, overrides = policy_check(asked, ctx())
     assert overrides and conflicts(asked, final, overrides) == []
+
+
+# --- M4: a saved "keep it light" fact, enforced in code -------------------------------------
+
+TRAVEL = {"text": "Traveling Thu-Sat, keep it light", "cap": 3}
+SICK = {"text": "Sick with a cold", "cap": 2}
+
+
+def test_a_light_fact_turns_hiit_into_an_easy_run_and_caps_effort():
+    final, overrides = policy_check(plan("HIIT", 5), ctx(context_caps=[TRAVEL]))
+    assert (final["workout_type"], final["intensity"]) == ("easy_run", 3)
+    decider = deciding_override(overrides)
+    assert decider["rule"] == "context_cap" and "Traveling Thu-Sat" in decider["plain"]
+
+
+def test_a_light_fact_keeps_strength_but_caps_it():
+    final, _ = policy_check(plan("strength", 4), ctx(context_caps=[TRAVEL]))
+    assert (final["workout_type"], final["intensity"]) == ("strength", 3)
+
+
+def test_a_very_light_fact_allows_only_walk_mobility_or_rest():
+    final, _ = policy_check(plan("easy_run", 3), ctx(context_caps=[SICK]))
+    assert (final["workout_type"], final["intensity"]) == ("walk", 2)
+
+
+def test_the_strictest_fact_wins_and_an_easy_plan_is_untouched():
+    final, _ = policy_check(plan("easy_run", 3), ctx(context_caps=[TRAVEL, SICK]))
+    assert final["workout_type"] == "walk"
+    proposed = plan("walk", 2)
+    assert policy_check(proposed, ctx(context_caps=[TRAVEL])) == (proposed, [])
+
+
+def test_a_light_fact_is_not_a_body_reason():
+    final, overrides = policy_check(plan("HIIT", 5), ctx(context_caps=[TRAVEL]))
+    assert why_sentence(final, overrides, body_ok=True).startswith("Your body could handle more, but you noted")

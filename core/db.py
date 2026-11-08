@@ -137,7 +137,8 @@ CREATE TABLE IF NOT EXISTS memory (
     kind        TEXT NOT NULL,           -- goal / diet / preference / instruction / context
     start_date  TEXT,                    -- YYYY-MM-DD inclusive, NULL = always
     end_date    TEXT,                    -- YYYY-MM-DD inclusive, NULL = always
-    created_at  TEXT NOT NULL
+    created_at  TEXT NOT NULL,
+    intensity_cap INTEGER                -- "keep it light" while the fact applies: 3 light, 2 very light, NULL none
 );
 
 CREATE TABLE IF NOT EXISTS chat_sessions (
@@ -163,6 +164,14 @@ CREATE TABLE IF NOT EXISTS oura_cache (
     start_date  TEXT NOT NULL,
     end_date    TEXT NOT NULL,
     raw_json    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS oura_history_cache (
+    user_id     INTEGER PRIMARY KEY,     -- one cached range fetch per user (history questions, up to 90 days)
+    fetched_at  TEXT NOT NULL,
+    start_date  TEXT NOT NULL,
+    end_date    TEXT NOT NULL,           -- exclusive, like oura_cache
+    raw_json    TEXT NOT NULL            -- daily endpoints only (no heartrate)
 );
 
 CREATE TABLE IF NOT EXISTS daily_scores (
@@ -286,6 +295,14 @@ def _needs_migration() -> bool:
     return bool(tables) and "users" not in tables
 
 
+def _needs_m4() -> bool:
+    """True for a database that still needs an M4 step (see _m4_steps)."""
+    if not _db_path.exists():
+        return False
+    with connect() as conn:
+        return bool(_m4_steps(conn))
+
+
 def _legacy_to_m31(conn) -> None:
     """M2 -> M3: per-plan fields move from daily_log to sessions; food_log gains logged_at.
     M3 -> M3.1: sessions gains done_by and details_json."""
@@ -378,6 +395,32 @@ def _seed_first_user(conn) -> None:
                      (text, kind, _stamp()))
 
 
+def _m4_steps(conn) -> list[str]:
+    """M3.2 -> M4 changes this database still needs (empty when it is current)."""
+    tables, steps = _tables(conn), []
+    if "memory" in tables and "intensity_cap" not in _columns(conn, "memory"):
+        steps.append("memory.intensity_cap")
+    if "context_notes" in tables:
+        steps.append("drop context_notes")
+    return steps
+
+
+def _m4_migrate(conn) -> None:
+    """M3.2 -> M4: memory gains intensity_cap; context_notes is dropped once every still-active note is
+    in memory (aborts otherwise, so no note is lost). Runs after SCHEMA, guarded step by step."""
+    if "intensity_cap" not in _columns(conn, "memory"):
+        conn.execute("ALTER TABLE memory ADD COLUMN intensity_cap INTEGER")
+    if "context_notes" in _tables(conn):
+        today = datetime.now(TZ).date().isoformat()
+        missing = conn.execute(
+            "SELECT COUNT(*) FROM context_notes n WHERE n.end_date >= ? AND NOT EXISTS (SELECT 1 FROM memory m "
+            "WHERE m.user_id = 1 AND m.kind = 'context' AND m.text = n.note AND m.start_date IS n.start_date "
+            "AND m.end_date IS n.end_date)", (today,)).fetchone()[0]
+        if missing:
+            raise RuntimeError(f"{missing} active context note(s) are not in memory; context_notes was not dropped.")
+        conn.execute("DROP TABLE context_notes")
+
+
 def _run_schema(conn) -> None:
     for statement in SCHEMA.split(";"):
         if statement.strip():
@@ -388,7 +431,7 @@ def init_db() -> None:
     """Create tables. An older database is backed up first, then migrated in one transaction
     (never without a backup). Row counts are checked before the migration commits."""
     migrate = _needs_migration()
-    if migrate:
+    if migrate or _needs_m4():
         backup = backup_db()  # raises if it fails, so the migration never runs without a backup
         print(f"Backed up {_db_path.name} to {backup} before migrating.")
     conn = sqlite3.connect(_db_path, timeout=10, isolation_level=None)  # explicit BEGIN/COMMIT below
@@ -405,6 +448,7 @@ def init_db() -> None:
             _run_schema(conn)
             if migrate:
                 _m31_copy_rows(conn)
+            _m4_migrate(conn)
             _seed_first_user(conn)
             if migrate:
                 food_after = _count(conn, "food_log")
@@ -749,10 +793,11 @@ def _rows_between(table: str, column: str, user_id: int, start: datetime, end: d
 # --- saved memory -----------------------------------------------------------
 
 def add_memory(user_id: int, text: str, kind: str, start_date: date | None = None,
-               end_date: date | None = None) -> dict:
+               end_date: date | None = None, intensity_cap: int | None = None) -> dict:
     row = {"user_id": user_id, "text": text, "kind": kind,
            "start_date": start_date.isoformat() if start_date else None,
-           "end_date": end_date.isoformat() if end_date else None, "created_at": _stamp()}
+           "end_date": end_date.isoformat() if end_date else None, "created_at": _stamp(),
+           "intensity_cap": intensity_cap}
     with connect() as conn:
         cur = conn.execute(f"INSERT INTO memory ({', '.join(row)}) VALUES ({', '.join('?' * len(row))})",
                            list(row.values()))
@@ -888,6 +933,16 @@ def add_message(user_id: int, chat_session_id: int, ts: datetime, role: str, tex
                      (user_id, chat_session_id, _iso(ts), role, text))
 
 
+def previous_session_last_message(user_id: int, chat_session_id: int) -> dict | None:
+    """The last message of the user's chat session before this one, or None."""
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM messages WHERE user_id = ? AND chat_session_id = (SELECT MAX(id) FROM chat_sessions "
+            "WHERE user_id = ? AND id < ?) ORDER BY ts DESC, id DESC LIMIT 1",
+            (user_id, user_id, chat_session_id)).fetchone()
+    return dict(row) if row else None
+
+
 def session_messages(chat_session_id: int, limit: int | None = None) -> list[dict]:
     """The session's messages, oldest first (the newest `limit` if given)."""
     with connect() as conn:
@@ -911,6 +966,25 @@ def get_oura_cache(user_id: int) -> dict | None:
     """{"fetched_at", "start_date", "end_date", "raw"} of the user's newest fetch, or None."""
     with connect() as conn:
         row = conn.execute("SELECT * FROM oura_cache WHERE user_id = ?", (user_id,)).fetchone()
+    if row is None:
+        return None
+    return {"fetched_at": datetime.fromisoformat(row["fetched_at"]), "start_date": date.fromisoformat(row["start_date"]),
+            "end_date": date.fromisoformat(row["end_date"]), "raw": json.loads(row["raw_json"])}
+
+
+def save_oura_history(user_id: int, start: date, end: date, raw: dict, fetched_at: datetime) -> None:
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO oura_history_cache (user_id, fetched_at, start_date, end_date, raw_json) "
+            "VALUES (?, ?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET fetched_at = excluded.fetched_at, "
+            "start_date = excluded.start_date, end_date = excluded.end_date, raw_json = excluded.raw_json",
+            (user_id, _iso(fetched_at), start.isoformat(), end.isoformat(), json.dumps(raw)))
+
+
+def get_oura_history(user_id: int) -> dict | None:
+    """Like get_oura_cache, for the range fetch of history questions."""
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM oura_history_cache WHERE user_id = ?", (user_id,)).fetchone()
     if row is None:
         return None
     return {"fetched_at": datetime.fromisoformat(row["fetched_at"]), "start_date": date.fromisoformat(row["start_date"]),

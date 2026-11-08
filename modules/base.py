@@ -1,5 +1,5 @@
 """The module contract. A module is one area of coaching a person can turn on (training, nutrition;
-sleep and habits later). Kept deliberately small: no plugin framework, just these five methods.
+sleep and habits later). Kept deliberately small: no plugin framework, just these few methods.
 
 Deterministic rules live inside each module as plain code; the agent only gets the tools of
 the modules the user has enabled.
@@ -44,6 +44,10 @@ class Module(Protocol):
 
     def score(self, user, day: date, now: datetime | None = None) -> ScoreComponent:
         """This module's deterministic contribution to the day's score (`now` None = the day is over)."""
+
+    def daily_summaries(self, user, days: list[date], metrics_by_day: dict) -> dict[str, dict]:
+        """{YYYY-MM-DD: this module's numbers for that day} (day summaries and best/worst-day comparisons).
+        `metrics_by_day` is the device data already fetched for these days (connectors.health.Health.history)."""
 
     def help_lines(self) -> list[str]:
         """Plain-language lines for /help."""

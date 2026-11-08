@@ -44,8 +44,18 @@ def env_optional(name: str) -> str | None:
 # Every value that must never appear in logs or chat replies.
 SECRET_ENV_VARS = [
     "OPENAI_API_KEY", "OURA_CLIENT_ID", "OURA_CLIENT_SECRET", "OURA_ACCESS_TOKEN",
-    "OURA_REFRESH_TOKEN", "TELEGRAM_BOT_TOKEN", "GCAL_ICAL_URL",
+    "OURA_REFRESH_TOKEN", "TELEGRAM_BOT_TOKEN", "GCAL_ICAL_URL", "USDA_API_KEY", "LANGSMITH_API_KEY",
 ]
+# Keys the app expects in .env. check_keys() reports which are present, never their values.
+EXPECTED_ENV_VARS = SECRET_ENV_VARS + ["TELEGRAM_CHAT_ID", "LANGSMITH_TRACING", "LANGSMITH_PROJECT"]
+
+
+def check_keys() -> dict[str, bool]:
+    """Print present/missing for every expected key (never a value) and return the same as a dict."""
+    found = {name: bool(os.getenv(name)) for name in EXPECTED_ENV_VARS}
+    for name, present in found.items():
+        print(f"{name}: {'present' if present else 'MISSING'}")
+    return found
 
 
 def redact(text: str) -> str:

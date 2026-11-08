@@ -44,7 +44,7 @@ def load_config() -> dict:
 
 # --- pure parts -----------------------------------------------------------------
 
-def _evening_minutes(t: datetime) -> int:
+def evening_minutes(t: datetime) -> int:
     """Minutes after 18:00, so bedtimes either side of midnight compare (23:30 -> 330, 00:30 -> 390)."""
     return (t.hour * 60 + t.minute - 18 * 60) % (24 * 60)
 
@@ -53,7 +53,7 @@ def usual_bedtime(previous: list[datetime]) -> datetime | None:
     """The average of earlier bedtimes (as a clock time on the last of them), or None without any."""
     if not previous:
         return None
-    mean = round(sum(_evening_minutes(b) for b in previous) / len(previous))
+    mean = round(sum(evening_minutes(b) for b in previous) / len(previous))
     return previous[-1].replace(hour=(18 + mean // 60) % 24, minute=mean % 60)
 
 
@@ -75,7 +75,7 @@ def recovery_component(time_in_bed_h: float | None, bedtime: datetime | None, pr
                       "note": f"{time_in_bed_h:.1f} h in bed (target {bed_target_h:g} h)"})
     usual = usual_bedtime(previous_bedtimes) if len(previous_bedtimes) >= rules["bedtime_min_nights"] else None
     if bedtime is not None and usual is not None:
-        off = abs(_evening_minutes(bedtime) - _evening_minutes(usual))
+        off = abs(evening_minutes(bedtime) - evening_minutes(usual))
         parts.append({"name": "bedtime", "fraction": _linear(off, rules["bedtime_full_within_min"],
                                                              rules["bedtime_zero_after_min"]),
                       "note": f"bed at {clock(bedtime)}, usual {clock(usual)}"})

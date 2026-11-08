@@ -89,6 +89,16 @@ class TrainingModule:
                                                      context)})
         return rest_week(days, goals["schedule"]["rest_days_per_week"])
 
+    def daily_summaries(self, user, days: list[date], metrics_by_day: dict) -> dict[str, dict]:
+        """Per day: the workouts that count, their minutes, whether it was a hard day, and each plan's status."""
+        from modules.training import history
+        rules = user.goals()["activity"]
+        start, end = min(days), max(days)
+        plans = history.plans_by_day(user, start, end)
+        manual = (self.health or Health()).manual_by_day(user, start, end)
+        items = history.activity_by_day(user, start, end, metrics_by_day, manual, rules, plans)
+        return {d.isoformat(): history.day_training(items[d.isoformat()], plans[d.isoformat()], rules) for d in days}
+
     def help_lines(self) -> list[str]:
         return ['"want to work out now": I ask how you feel, then plan a workout for right now',
                 '"done", "did a 30 min walk at 6": I mark your plan done or add the workout',

@@ -206,6 +206,8 @@ def daily_metrics(raw: dict, day: date, tz=TZ) -> dict:
                 "start": local(w["start_datetime"]).isoformat(timespec="minutes"),
                 "end": local(w["end_datetime"]).isoformat(timespec="minutes"),
                 "minutes": round((local(w["end_datetime"]) - local(w["start_datetime"])).total_seconds() / 60),
+                # `distance` is in meters (judged from the values; the response has no unit), sometimes null.
+                "distance_km": round(w["distance"] / 1000, 2) if w.get("distance") is not None else None,
             }
             for w in raw["workout"]["data"] if w["day"] == key
         ],
@@ -250,6 +252,27 @@ class OuraSource:
                 raise OuraAuthError("Only user 1 has Oura tokens (per-user Oura login comes with onboarding).")
             raw = OuraClient().fetch_range(start, end)
         db.save_oura_cache(user.id, start, end, raw, now)
+        return raw
+
+    def history(self, user, start: date, end: date, now: datetime | None = None) -> dict:
+        """Raw daily collections covering start..end (inclusive), for history questions (up to 90 days).
+        Daily endpoints only: heartrate comes back empty, so `hr_avg`/`hr_max` are None for these days.
+        Reuses the regular fetch when it covers the range, else its own cache (`oura_history_cache`, 10 min)."""
+        now = now or datetime.now(user.tz)
+        stop = end + timedelta(days=1)            # Oura's end_date: the data runs through the day before it
+        for cache in (db.get_oura_cache(user.id), db.get_oura_history(user.id)):
+            if (cache is not None and cache["start_date"] <= start and cache["end_date"] >= stop
+                    and now - cache["fetched_at"] < CACHE_TTL):
+                return cache["raw"]
+        if self.use_fixtures:
+            raw = load_fixtures()
+        else:
+            if user.id != 1:
+                raise OuraAuthError("Only user 1 has Oura tokens (per-user Oura login comes with onboarding).")
+            client = OuraClient()
+            raw = {name: client.daily(name, start, stop) for name in DAILY_ENDPOINTS}
+            raw["heartrate"] = {"data": []}
+        db.save_oura_history(user.id, start, stop, raw, now)
         return raw
 
     def refresh(self, user, day: date, now: datetime | None = None) -> bool:

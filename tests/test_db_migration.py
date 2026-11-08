@@ -1,4 +1,4 @@
-"""Older databases (M2, M3.1) are backed up, then migrated to M3.2 in one transaction."""
+"""Older databases (M2, M3.1, M3.2) are backed up, then migrated to the current schema in one transaction."""
 import json
 import sqlite3
 from datetime import date, datetime, timedelta
@@ -130,7 +130,8 @@ def test_m31_database_is_backed_up_then_migrated(m31_db):
     # memory: seeded diet facts + only the still-active context note
     texts = [m["text"] for m in db.list_memory(1)]
     assert texts == ["traveling, keep it light", "Vegetarian, eats eggs", "Prefers Indian food"]
-    assert "context_notes" in tables(m31_db)                                 # left in place, read-only
+    assert "context_notes" not in tables(m31_db)                             # M4: dropped once copied
+    assert "intensity_cap" in columns(m31_db, "memory")
 
 
 def test_m2_database_migrates_all_the_way(m2_db):
@@ -180,3 +181,43 @@ def test_fresh_database_needs_no_backup_and_seeds_user_1(at_path):
     assert row["timezone"] == "America/Chicago" and json.loads(row["enabled_modules"]) == ["training", "nutrition"]
     assert row["score_cutoff"] == "21:00" and row["session_gap_min"] == 15
     assert [m["text"] for m in db.list_memory(1)] == ["Vegetarian, eats eggs", "Prefers Indian food"]
+
+
+# --- M3.2 -> M4: memory.intensity_cap, context_notes dropped -------------------------------------
+
+@pytest.fixture
+def m32_db(at_path):
+    """An M3.2 database: memory without intensity_cap, context_notes still there (its active note in memory)."""
+    today = datetime.now(TZ).date()
+    db.init_db()
+    with sqlite3.connect(at_path) as conn:
+        conn.execute("ALTER TABLE memory DROP COLUMN intensity_cap")
+        conn.execute("CREATE TABLE context_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, note TEXT NOT NULL, "
+                     "start_date TEXT NOT NULL, end_date TEXT NOT NULL, created_at TEXT NOT NULL)")
+        dates = (today.isoformat(), (today + timedelta(days=2)).isoformat())
+        conn.execute("INSERT INTO context_notes (note, start_date, end_date, created_at) VALUES (?, ?, ?, 'x')",
+                     ("traveling, keep it light", *dates))
+        conn.execute("INSERT INTO context_notes (note, start_date, end_date, created_at) VALUES "
+                     "('an old trip', '2026-09-01', '2026-09-02', 'x')")
+        conn.execute("INSERT INTO memory (user_id, text, kind, start_date, end_date, created_at) "
+                     "VALUES (1, 'traveling, keep it light', 'context', ?, ?, 'x')", dates)
+    return at_path
+
+
+def test_m32_database_is_backed_up_then_gets_the_m4_changes(m32_db):
+    db.init_db()
+    [backup] = backups(m32_db)
+    assert "context_notes" in tables(backup) and "intensity_cap" not in columns(backup, "memory")
+    assert "context_notes" not in tables(m32_db) and "intensity_cap" in columns(m32_db, "memory")
+    assert [m["text"] for m in db.list_memory(1)][-1] == "traveling, keep it light"   # facts kept
+    assert all(m["intensity_cap"] is None for m in db.list_memory(1))                # no guessing from text
+    db.init_db()
+    assert len(backups(m32_db)) == 1                                                  # nothing left to do
+
+
+def test_an_active_note_missing_from_memory_stops_the_drop(m32_db):
+    with sqlite3.connect(m32_db) as conn:
+        conn.execute("DELETE FROM memory WHERE text = 'traveling, keep it light'")
+    with pytest.raises(RuntimeError, match="not in memory"):
+        db.init_db()
+    assert "context_notes" in tables(m32_db) and "intensity_cap" not in columns(m32_db, "memory")  # rolled back

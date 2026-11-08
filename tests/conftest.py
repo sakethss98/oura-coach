@@ -6,6 +6,12 @@ import sys
 import uuid
 from pathlib import Path
 
+# No LangSmith traces from tests unless asked for (LANGSMITH_TESTS=1). Set before core.config runs
+# load_dotenv, which never overrides a variable that is already set.
+if not os.getenv("LANGSMITH_TESTS"):
+    os.environ["LANGSMITH_TRACING"] = "false"
+    os.environ["LANGCHAIN_TRACING_V2"] = "false"
+
 import icalendar
 import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -90,6 +96,25 @@ def judge(message: str, reply: str) -> Verdict:
     """The yes/no rubric from docs/scenarios.md (a real model call; live tests only)."""
     from core.llm import structured_call
     return structured_call("judge", Verdict, JUDGE, f"They wrote: {message}\nThe reply: {reply}")
+
+
+class Pushback(BaseModel):
+    noticed: bool = Field(description="true if it names what it noticed about their plan or their day")
+    honest_call: bool = Field(description="true if it says plainly, and kindly, that the plan works against them")
+    options: bool = Field(description="true if it offers one better option or two options")
+    their_choice: bool = Field(description="true if it leaves the decision to them, e.g. a short question")
+    guilt: bool = Field(description="true if it blames, shames or guilts them (missed, failed, should have, lazy)")
+    reason: str = Field(description="one short sentence")
+
+
+PUSHBACK_JUDGE = ("You check one reply from a running and nutrition coach. The person proposed something that works "
+                  "against them. Answer each check yes or no about the reply only.")
+
+
+def judge_pushback(message: str, reply: str) -> Pushback:
+    """The pushback rubric (docs/scenarios.md M4-8..10): noticed, honest call, options, their choice, no guilt."""
+    from core.llm import structured_call
+    return structured_call("judge", Pushback, PUSHBACK_JUDGE, f"They wrote: {message}\nThe reply: {reply}")
 
 
 @pytest.fixture

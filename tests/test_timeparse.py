@@ -83,3 +83,28 @@ def test_past_days_look_back(text, expected):
 @pytest.mark.parametrize("text", ["tomorrow", "2026-11-01", "sometime", "next Friday"])
 def test_future_or_unreadable_days_give_none(text):
     assert resolve_past_day(text, WEDNESDAY_OCT_7) is None
+
+
+# --- resolve_range (M4 history tools) --------------------------------------------------------
+
+def test_resolve_range_phrases():
+    from core.timeparse import resolve_range
+    sunday = date(2026, 11, 8)
+    assert resolve_range(7, None, None, sunday) == (date(2026, 11, 2), sunday, None)
+    assert resolve_range(None, "this week", None, sunday)[:2] == (date(2026, 11, 2), sunday)
+    assert resolve_range(None, "the last week", None, sunday)[:2] == (date(2026, 11, 2), sunday)   # 7 days
+    assert resolve_range(None, "last week", None, sunday)[:2] == (date(2026, 10, 26), date(2026, 11, 1))  # Mon-Sun
+    assert resolve_range(None, "this month", None, sunday)[:2] == (date(2026, 11, 1), sunday)
+    assert resolve_range(None, "last month", None, sunday)[:2] == (date(2026, 10, 1), date(2026, 10, 31))
+    assert resolve_range(None, "last 4 weeks", None, sunday)[:2] == (date(2026, 10, 12), sunday)
+    assert resolve_range(None, "Oct 1", "Oct 10", sunday)[:2] == (date(2026, 10, 1), date(2026, 10, 10))
+    assert resolve_range(None, None, None, sunday)[:2] == (date(2026, 11, 2), sunday)            # default: 7 days
+
+
+def test_resolve_range_caps_at_90_days_and_refuses_what_it_cant_read():
+    from core.timeparse import resolve_range
+    sunday = date(2026, 11, 8)
+    start, end, note = resolve_range(200, None, None, sunday)
+    assert ((end - start).days + 1, note) == (90, "Only the last 90 days are covered.")
+    assert resolve_range(None, "Oct 10", "Oct 1", sunday) is None                                # backwards
+    assert resolve_range(None, "someday", None, sunday) is None

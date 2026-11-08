@@ -1,6 +1,7 @@
 """The coach agent: understand the message, act with tools, reply within the reply rules.
 
     ingest -> greet (whole-message greeting, code only) -------------> respond -> END
+           -> confirm_previous (a bare "yes" to an old question, code) -> respond -> END
            -> agent <-> tools (ToolNode, the user's enabled modules) -> respond -> END
 
 One LangGraph thread per chat session (`session-{user_id}-{start}`, core/chat_sessions.py), so the
@@ -17,9 +18,10 @@ from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from connectors.health import Health
-from core import db, memory, reply_rules, score
+from core import chat_sessions, db, memory, reply_rules, score
 from core.config import CONSULT_TTL_MIN, OPENAI_MODEL
 from core.day import day_of
+from core.labels import clock
 from core.llm import load_prompt
 from core.tools import CORE_TOOLS, turn
 from modules.registry import AVAILABLE, enabled_modules, load
@@ -28,6 +30,8 @@ GREETING = re.compile(r"^\s*(hi+|hey+|hello+|hiya|yo|good\s+(morning|afternoon|e
 GREETING_TAIL = "Tell me what you ate, ask for a workout, or ask how your day is going."
 EXPIRED_CHECKIN = "Still want to check in today?"
 NO_REPLY = "Could you say that another way?"
+CONFIRM_PREVIOUS = "Just to check: do you mean my question from {when}: “{question}”"
+QUOTE_MAX_WORDS = 25
 HISTORY_HUMAN_TURNS = 5      # the agent sees the conversation from the 5th-last message they sent (~10 messages)
 # Tools that change something. When one of them ran next to a tool whose text is sent as is,
 # the agent's own line (e.g. "Logged 2 eggs.", or the answer to the rest of "done, what should I eat?")
@@ -42,7 +46,9 @@ def make_model():
 
 class AgentState(MessagesState):
     greeting: bool          # this turn's message is only a greeting
+    confirm_previous: bool  # a bare "yes" over 12 h after the question it may answer: ask which one first
     expired_checkin: bool   # a check-in question from an earlier session was left unanswered today
+    code_reply: bool        # this turn's reply was built by code (greeting, confirmation): no reply rules
 
 
 def all_tools() -> list:
@@ -70,9 +76,26 @@ def recent(messages: list) -> list:
     return messages[start:]
 
 
+def _when(sent, now) -> str:
+    """"today at 9:05am", "yesterday at 11:08am", "Saturday at 11:08am"."""
+    day = ("today" if sent.date() == now.date() else "yesterday" if (now.date() - sent.date()).days == 1
+           else f"{sent:%A}")
+    return f"{day} at {clock(sent)}"
+
+
+def _quote(text: str) -> str:
+    words = text.split()
+    return text if len(words) <= QUOTE_MAX_WORDS else " ".join(words[:QUOTE_MAX_WORDS]) + "…"
+
+
 def system_prompt(t) -> str:
     lines = [load_prompt("agent"), "",
              f"Now: {t.now:%A %Y-%m-%d %H:%M}. Today (by their sleep): {t.day:%A %Y-%m-%d}."]
+    previous = chat_sessions.previous_question(t.user, t.session_id, t.now) if t.session_id else None
+    if previous:
+        lines.append(f"Your last message before this conversation (sent {previous['sent']:%a} "
+                     f"{clock(previous['sent'])}): {previous['text'][:400]!r}. If their message answers it, act on "
+                     "that answer.")
     facts = memory.facts(t.user, t.day)
     lines.append("Saved facts, oldest first (id: fact):" if facts else "Saved facts: none.")
     lines += [f"- {f['id']}: {memory.describe(f)}" for f in facts]
@@ -100,7 +123,11 @@ def ingest(state: AgentState, config) -> dict:
         # The question was asked in an earlier session: drop it, and ask once more if it is still today.
         db.abandon_pending(t.user.id)
         expired = pending["date"] == t.day.isoformat()
-    return {"greeting": bool(GREETING.match(_text(state["messages"][-1].content))), "expired_checkin": expired}
+    message = _text(state["messages"][-1].content)
+    first_message = sum(isinstance(m, HumanMessage) for m in state["messages"]) == 1
+    previous = chat_sessions.previous_question(t.user, t.session_id, t.now) if t.session_id and first_message else None
+    return {"greeting": bool(GREETING.match(message)), "expired_checkin": expired, "code_reply": False,
+            "confirm_previous": chat_sessions.needs_confirming(previous, message, t.now)}
 
 
 def greet(state: AgentState, config) -> dict:
@@ -114,7 +141,16 @@ def greet(state: AgentState, config) -> dict:
     except Exception:
         pass
     first = f"Hi! Readiness {readiness} today." if readiness is not None else "Hi! No readiness yet today."
-    return {"messages": [AIMessage(f"{first} {GREETING_TAIL}")]}
+    return {"messages": [AIMessage(f"{first} {GREETING_TAIL}")], "code_reply": True}
+
+
+def confirm_previous(state: AgentState, config) -> dict:
+    """A bare "yes" more than 12 hours after the question it may answer: ask which one (code, no tools),
+    so a stale "yes" never starts something else. Their next message is answered with the question in view."""
+    t = turn(config)
+    previous = chat_sessions.previous_question(t.user, t.session_id, t.now)
+    text = CONFIRM_PREVIOUS.format(when=_when(previous["sent"], t.now), question=_quote(previous["question"]))
+    return {"messages": [AIMessage(text)], "code_reply": True}
 
 
 def agent(state: AgentState, config) -> dict:
@@ -152,39 +188,51 @@ def respond(state: AgentState, config) -> dict:
     draft = _text(final.content)
 
     parts = []
-    if verbatim:
+    if state.get("code_reply"):
+        parts.append(draft)                     # built by code (greeting, confirmation), sent as is
+    elif verbatim:
         parts += verbatim                       # code-built text first, exactly as built
         built_by = {m.name for m in turn_messages if isinstance(m, ToolMessage) and isinstance(m.artifact, dict)
                     and m.artifact.get("verbatim")}
-        writes = tools_called & WRITE_TOOLS
+        # A tool that wrote nothing this time (mark_done with nothing to mark) is not a write.
+        no_write = {m.name for m in turn_messages if isinstance(m, ToolMessage) and isinstance(m.artifact, dict)
+                    and m.artifact.get("wrote") is False}
+        writes = (tools_called & WRITE_TOOLS) - no_write
+        their_message = next(m for m in reversed(state["messages"]) if isinstance(m, HumanMessage))
+        asked = "?" in _text(their_message.content)             # they also asked something: keep the answer
         # The agent's line confirms a write or answers the rest; not needed when code text did both
         # ("done, what should I eat?" = mark_done's confirmation + suggest_meal's ideas).
         covered = writes <= built_by and bool(built_by - WRITE_TOOLS)
         repeats = any(draft and draft in v for v in verbatim)
-        if draft and writes and not covered and not repeats:
+        if draft and (writes or (no_write and asked)) and not covered and not repeats:
             parts.append(_within_rules(draft, tools_called, t))
     elif draft:
         parts.append(_within_rules(draft, tools_called, t))
-    reply = "\n\n".join(p for p in parts if p) or NO_REPLY
+    reply ="\n\n".join(p for p in parts if p) or NO_REPLY
     if state.get("expired_checkin"):
         reply += f"\n{EXPIRED_CHECKIN}"
     return {"messages": [AIMessage(content=reply, id=final.id)]}   # same id: replaces the draft in the thread
 
 
 def after_ingest(state: AgentState) -> str:
-    return "greeting" if state["greeting"] else "anything else"
+    if state["greeting"]:
+        return "greeting"
+    return "stale yes" if state["confirm_previous"] else "anything else"
 
 
 def build_agent(checkpointer=None):
     graph = StateGraph(AgentState)
     graph.add_node("ingest", ingest)
     graph.add_node("greet", greet)
+    graph.add_node("confirm_previous", confirm_previous)
     graph.add_node("agent", agent)
     graph.add_node("tools", ToolNode(all_tools()))
     graph.add_node("respond", respond)
     graph.add_edge(START, "ingest")
-    graph.add_conditional_edges("ingest", after_ingest, {"greeting": "greet", "anything else": "agent"})
+    graph.add_conditional_edges("ingest", after_ingest, {"greeting": "greet", "stale yes": "confirm_previous",
+                                                         "anything else": "agent"})
     graph.add_edge("greet", "respond")
+    graph.add_edge("confirm_previous", "respond")
     graph.add_conditional_edges("agent", tools_condition, {"tools": "tools", END: "respond"})
     graph.add_edge("tools", "agent")
     graph.add_edge("respond", END)

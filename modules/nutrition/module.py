@@ -6,7 +6,7 @@ from datetime import date, datetime
 
 from connectors.health import Health
 from core import db
-from core.day import day_bounds
+from core.day import bounds_of_days, day_bounds
 from modules.base import NudgeSpec, ScoreComponent
 from modules.nutrition.score import is_after_cutoff, load_rules, score_day
 from modules.nutrition.targets import daily_targets
@@ -45,6 +45,11 @@ class NutritionModule:
         targets = daily_targets(body, user.goals()["nutrition"])["targets"]
         entries = db.food_between(user.id, *day_bounds(user, day))
         return score_day(entries, targets, load_rules(), user.goal_rigor, is_after_cutoff(user, day, now))
+
+    def daily_summaries(self, user, days: list[date], metrics_by_day: dict) -> dict[str, dict]:
+        """Per day: the food totals (kcal, protein, carbs, fiber, caffeine, alcohol) and how many entries."""
+        return {d.isoformat(): food_totals(db.food_between(user.id, *bounds))
+                for d, bounds in bounds_of_days(user, days).items()}
 
     def help_lines(self) -> list[str]:
         return ['"had poha and chai at 8", "a 30 cal soda": I log it (your numbers win over my estimate)',

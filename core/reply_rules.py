@@ -3,6 +3,7 @@
 - At most 3 lines and about 60 words.
 - Plain words: no internal terms (band labels, intensity numbers, snake_case, "window", "null"),
   and no tacked-on "anything else?" (answer what was asked, then stop).
+- Never offer what no tool can do ("want me to look it up?", "I can search online"): answer instead.
 - Never claim an action no tool performed this turn. Only first-person claims count
   ("I logged", "I've updated", "I'll resend"), never the bare word ("logged 2 eggs" is fine
   after log_food ran, and "you logged" is not a claim at all).
@@ -11,6 +12,9 @@ import re
 
 MAX_LINES = 3
 MAX_WORDS = 60
+
+# Blame words: never about the person ("bad" is left out: "a bad night" is about the night, not them).
+GUILT = re.compile(r"\b(missed|failed|should\s+have|lazy|behind)\b", re.I)
 
 BANNED = [
     (re.compile(r"\bbands?\b", re.I), "the word 'band'"),
@@ -21,6 +25,18 @@ BANNED = [
     (re.compile(r"\b[a-z]+_[a-z0-9_]+\b"), "a snake_case term"),
     (re.compile(r"\banything else\b", re.I), "an extra offer ('anything else')"),
     (re.compile(r"\boverrides?\b", re.I), "the word 'override'"),
+    (GUILT, "a guilt word (missed, failed, should have, behind)"),
+]
+
+# Offers of an action the coach has no tool for (searching, browsing, looking things up). Never allowed:
+# with a tool it should just use it, without one it should answer from what it knows.
+OFFERS = [
+    re.compile(r"\b(want|would you like|shall|should|do you want)\s+me\s+to\s+(look|search|check|browse|google|find)\b",
+               re.I),
+    re.compile(r"\bI\s+(can|could)\s+(search|browse|google|look\s+(it|that|this|them)?\s*up|check\s+online|"
+               r"find\s+out\s+online)\b", re.I),
+    re.compile(r"\bI['’]ll\s+(check|look|search)\s+(online|the\s+web|it\s+up|that\s+up)\b", re.I),
+    re.compile(r"\blet\s+me\s+(search|google|browse|look\s+(it|that|this)\s+up|check\s+online)\b", re.I),
 ]
 
 _I = r"\bI(?:['’]ve|\s+have)?\s+(?:just\s+|already\s+|now\s+)?"
@@ -45,6 +61,10 @@ def _words(text: str) -> int:
 
 def _sentence_problems(sentence: str, tools_called: set[str]) -> list[str]:
     problems = [f"uses {what}" for pattern, what in BANNED if pattern.search(sentence)]
+    for pattern in OFFERS:
+        match = pattern.search(sentence)
+        if match:
+            problems.append(f'offers "{match.group(0).strip()}", which no tool can do: answer from what you know')
     for pattern, needs in CLAIMS:
         match = pattern.search(sentence)
         if match and not (needs & tools_called):
@@ -64,22 +84,25 @@ def violations(text: str, tools_called: set[str]) -> list[str]:
 
 
 def enforce(text: str, tools_called: set[str]) -> str:
-    """Last resort: drop sentences that break a rule, then cut to 3 lines and 60 words."""
-    kept_lines = []
+    """Last resort: drop sentences that break a rule, keep 3 lines, then keep whole sentences in order while
+    they fit in 60 words (a sentence that doesn't fit is left out, so a short closing question can still
+    make it). Only a first sentence longer than 60 words on its own is cut, with "…"."""
+    lines = []
     for line in text.splitlines():
-        sentences = re.split(r"(?<=[.!?])\s+", line.strip())
-        kept = [s for s in sentences if s and not _sentence_problems(s, tools_called)]
-        if kept:
-            kept_lines.append(" ".join(kept))
-    kept_lines = kept_lines[:MAX_LINES]
+        sentences = [s for s in re.split(r"(?<=[.!?])\s+", line.strip())
+                     if s and not _sentence_problems(s, tools_called)]
+        if sentences:
+            lines.append(sentences)
     out, count = [], 0
-    for line in kept_lines:
-        words = line.split()
-        if count + len(words) > MAX_WORDS:
-            words = words[:MAX_WORDS - count]
-            if words:
-                out.append(" ".join(words).rstrip(",;:") + "…")
-            break
-        out.append(line)
-        count += len(words)
+    for sentences in lines[:MAX_LINES]:
+        kept = []
+        for sentence in sentences:
+            words = len(sentence.split())
+            if count + words <= MAX_WORDS:
+                kept.append(sentence)
+                count += words
+        if kept:
+            out.append(" ".join(kept))
+    if not out and lines:
+        out = [" ".join(lines[0][0].split()[:MAX_WORDS]).rstrip(",;:") + "…"]
     return "\n".join(out)

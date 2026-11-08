@@ -7,17 +7,19 @@ never guess. Numbers the person states always win over estimates. Meal ideas and
 by code and sent as they are (artifact {"verbatim": text}).
 """
 import re
+from datetime import timedelta
+from typing import Literal
 
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 
 from core import db
-from core.day import day_bounds
+from core.day import bounds_of_days, day_bounds
 from core.labels import clock
 from core.timeparse import parse_clock_time, resolve_past_day
-from core.tools import Messages, as_json, ids_shown, turn
-from modules.nutrition import meals
+from core.tools import GroupBy, Messages, as_json, ids_shown, range_for, range_label, turn, with_range_args
+from modules.nutrition import history, meals
 from modules.nutrition.food import edit_food as change_food, log_food as save_food
 from modules.nutrition.messages import confirm_entry
 from modules.nutrition.targets import dish_key
@@ -142,6 +144,29 @@ def remove_food(entry_ids: list[int], state: Messages, config: RunnableConfig) -
     return as_json({"removed": [_entry(e) for e in removed]})
 
 
+Nutrient = Literal["calories", "protein_g", "carbs_g", "fiber_g", "caffeine_mg", "alcohol_drinks"]
+
+
+@tool("food_totals")
+@with_range_args
+def food_range(config: RunnableConfig, nutrients: list[Nutrient] | None = None, days_back: int | None = None,
+               start_text: str | None = None, end_text: str | None = None, per_day: bool = False,
+               group_by: GroupBy = None) -> str:
+    """Food over a range of days: totals, the average per logged day, and the lowest and highest day ("how much
+    protein did I have over the last week?", "which day this week was I lowest on protein?"). nutrients: which
+    ones, or null for calories and protein. per_day: true to list each day. At most the last 90 days."""
+    t = turn(config)
+    found = range_for(t, days_back, start_text, end_text)
+    if isinstance(found, dict):
+        return as_json(found)
+    start, end, note = found
+    days = [start + timedelta(days=i) for i in range((end - start).days + 1)]
+    totals = {d.isoformat(): food_totals(db.food_between(t.user.id, *bounds))
+              for d, bounds in bounds_of_days(t.user, days).items()}
+    result = history.summarize(totals, list(nutrients or []), t.day, per_day, group_by)
+    return as_json({"range": range_label(start, end), **({"note": note} if note else {}), **result})
+
+
 @tool(response_format="content_and_artifact")
 def suggest_meal(meal: str | None, ingredients: list[str] | None, constraints: str | None,
                  config: RunnableConfig) -> tuple[str, dict]:
@@ -169,4 +194,4 @@ def meal_recipe(dish: str, change: str | None, ingredients: list[str] | None,
             {"verbatim": result["text"]})
 
 
-TOOLS = [log_food, edit_food, list_food, remove_food, suggest_meal, meal_recipe]
+TOOLS = [log_food, edit_food, list_food, remove_food, suggest_meal, meal_recipe, food_range]

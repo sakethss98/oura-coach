@@ -13,8 +13,8 @@ LIGHT_TYPES = {"walk", "mobility", "rest"}
 WEEKEND = {5, 6}            # Saturday, Sunday
 MIN_BLOCK_MINUTES = 10      # a block cut shorter than this by the window is dropped
 # Rules that decide for reasons other than how recovered the body is.
-NON_BODY_RULES = {"checkin", "worked_out", "back_to_back", "weekly_cap", "long_run_weekday", "recent_food",
-                  "no_time"}
+NON_BODY_RULES = {"checkin", "context_cap", "worked_out", "back_to_back", "weekly_cap", "long_run_weekday",
+                  "recent_food", "no_time"}
 # Rules that always apply, even when the person chose to skip the others.
 TIME_RULES = {"window", "no_time"}
 
@@ -128,6 +128,23 @@ def _type_rules(blocks: list[dict], ctx: dict, overrides: list[dict]) -> None:
                 _add(overrides, rule, f"{who}: intensity {b['intensity']} capped at 3.", plain)
                 b["intensity"] = 3
 
+    caps = ctx.get("context_caps") or []
+    if caps:
+        fact = min(caps, key=lambda c: c["cap"])
+        reason = f"Saved fact {fact['text']!r} caps intensity at {fact['cap']}"
+        plain = f"You noted “{fact['text']}”, so I'd keep it light."
+        for b in blocks:
+            if fact["cap"] <= 2:
+                _light_only(b, overrides, "context_cap", reason, plain)
+                continue
+            if is_hard(b):
+                before = _downgrade_hard(b)
+                _add(overrides, "context_cap", f"{reason}: {before} changed to {b['workout_type']}.", plain,
+                     changes_type=before != b["workout_type"])
+            if b["intensity"] > fact["cap"]:
+                _add(overrides, "context_cap", f"{reason}: intensity {b['intensity']} capped at {fact['cap']}.", plain)
+                b["intensity"] = fact["cap"]
+
     if ctx["worked_out_today"]:
         for b in blocks:
             _light_only(b, overrides, "worked_out", f"Already worked out today ({ctx['worked_out_today']})",
@@ -186,8 +203,8 @@ def _skipped(override: dict) -> dict:
 
 
 def policy_check(plan: dict, ctx: dict, user_choice: bool = False) -> tuple[dict, list[dict]]:
-    """Apply the hard rules, in this order: readiness floor, band, already worked out, back-to-back,
-    weekly cap, long run on weekdays, recent food, then the clock (plan window).
+    """Apply the hard rules, in this order: readiness floor, band, a saved "keep it light" fact, already
+    worked out, back-to-back, weekly cap, long run on weekdays, recent food, then the clock (plan window).
 
     user_choice=True: they were told what the rules would change and chose their plan anyway. Only
     the clock still applies; every other rule that would have fired is recorded as rule "user_choice".
@@ -199,6 +216,7 @@ def policy_check(plan: dict, ctx: dict, user_choice: bool = False) -> tuple[dict
       yesterday_hard (str | None: why yesterday was a hard day),
       hard_days_prev6 (int: hard days among the 6 days before today), max_hard_days_per_week (int),
       recent_food ([{minutes_ago, calories}]), recent_food_caps (goals.yaml list),
+      context_caps ([{text, cap}]: saved facts asking to keep it light today; 3 = light, 2 = very light),
       window (["HH:MM", "HH:MM"] | None: from now until the next event)
     """
     plan, overrides = dict(plan), []

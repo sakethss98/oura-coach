@@ -21,9 +21,9 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 from connectors.health import Health
 from core import db, memory, score
-from core.agent import EXPIRED_CHECKIN
+from core.agent import CONFIRM_PREVIOUS, EXPIRED_CHECKIN
 from core.coach import VOICE, Coach
-from core.reply_rules import violations
+from core.reply_rules import GUILT, violations
 from core.llm import structured_call
 from modules.nutrition import food, meals
 from modules.nutrition.targets import dish_key
@@ -31,8 +31,9 @@ from modules.training import checkin
 from modules.training.baseline import food_totals
 from modules.training.module import TrainingModule
 from modules.training.planner import LATE_FOLLOW_UP, LATE_WHY
-from modules.training.tools import NO_OURA_MATCH
-from tests.conftest import call, core, ideas, judge, live, needs_fixtures, parsed_checkin, say, tool_results
+from modules.training.tools import NO_OURA_MATCH, RING_ONLY
+from tests.conftest import (call, core, ideas, judge, judge_pushback, live, needs_fixtures, parsed_checkin, say,
+                            tool_results)
 from today import fixtures_now, food_on
 
 pytestmark = needs_fixtures
@@ -379,7 +380,7 @@ def test_list_food_reads_any_past_day(coach, user, chat_model):
 
 # --- daily score (Phase 5) ---------------------------------------------------------------------
 
-GUILT = re.compile(r"\b(missed|failed|fail|only|should have|bad|behind|lazy|disappointing)\b", re.I)
+SCORE_GUILT = re.compile(r"\b(missed|failed|fail|only|should have|bad|behind|lazy|disappointing)\b", re.I)
 
 
 def score_turn(day=None):
@@ -751,13 +752,18 @@ def test_26_a_dated_fact_shapes_the_plan_in_range_and_is_gone_after(coach, user,
     chat = Chat(coach, user, chat_model)
     on_day(coach, -2)                                                             # said on Monday
     chat.send("remember I'm traveling Tue-Thu, keep it light", 9, 0, [
-        call("remember", fact="Traveling, keep it light", kind="context", start_text="Tue", end_text="Thu"),
+        call("remember", fact="Traveling, keep it light", kind="context", start_text="Tue", end_text="Thu",
+             keep_light="light"),
         say("Got it: traveling Tue–Thu, I'll keep it light.")])
     [trip] = [f for f in memory.facts(user) if f["kind"] == "context"]
-    assert (trip["start_date"], trip["end_date"]) == ("2026-10-06", "2026-10-08")
+    assert (trip["start_date"], trip["end_date"], trip["intensity_cap"]) == ("2026-10-06", "2026-10-08", 3)
     on_day(coach, 0)                                                              # Wednesday, during the trip
-    checkin_with_request(chat, None, "4 2", 7)
+    reply = checkin_with_request(chat, None, "4 2", 7)
     assert "Traveling, keep it light" in fake_llm.calls[-1][1]                    # the plan sees the trip
+    [planned] = plans_today(user)                                                 # the coach said HIIT; code decides
+    assert (planned["plan_json"]["workout_type"], planned["plan_json"]["intensity"]) == ("easy_run", 3)
+    assert "context_cap" in {o["rule"] for o in planned["override_reasons"]}
+    assert "you noted “Traveling, keep it light”" in reply
     on_day(coach, 2)                                                              # Friday, after it
     chat.send("what do you know about me?", 9, 0, [call("list_memory"),
                                                     say("You're vegetarian, eat eggs and prefer Indian food.")])
@@ -1076,7 +1082,7 @@ def test_live_list_food_any_day(coach, user):
 
 def assert_kind_score_reply(reply, headline_):
     assert headline_.split(",")[0] in reply, reply                               # the code's number, as given
-    assert not GUILT.search(reply), reply
+    assert not SCORE_GUILT.search(reply), reply
     assert_rules(reply, set())
 
 
@@ -1428,23 +1434,169 @@ def test_live_36_second_rest_day(coach, user, patch_oura):
     assert_kind_score_reply(reply, f"{stored['score']} today")
 
 
-# --- live: M4 capability targets (expected to fail until M4 Part A) --------------------------------
+# --- M4 Part A: history, a "yes" across sessions, general questions, workouts Oura can't see ---------
 
-M4 = pytest.mark.xfail(reason="M4", strict=False)
+def eat(day_offset: int, protein: float, hour=13, calories=600, text="dal and rice"):
+    db.add_food(1, text, {"entry_type": "meal", "est_calories": calories, "est_protein_g": protein},
+                at(hour) - timedelta(days=-day_offset))
+
+
+def a_week_of_dal():
+    """M4-1: 7 days of food, 20-26 g protein (161 g in all, 23 g a day)."""
+    for back in range(7):
+        eat(-back, 20 + back)
+
+
+def test_m4_1_protein_over_the_last_week_is_the_codes_sum(coach, user, chat_model):
+    a_week_of_dal()
+    Chat(coach, user, chat_model).send("How much protein did I have over the last week?", 18, 0, [
+        call("food_totals", nutrients=["protein_g"], days_back=7), say("161 g protein in the last 7 days, about 23 g a day.")])
+    result = last_tool_result(chat_model, "food_totals")
+    assert (result["total"]["protein_g"], result["average_per_logged_day"]["protein_g"]) == (161, 23)
+    assert result["days"] == 7 and result["range"] == "Thu Oct 1 to Wed Oct 7"
+
+
+def test_m4_2_summarize_a_day(coach, user, chat_model):
+    db.add_food(1, "rajma chawal", {"entry_type": "meal", "est_calories": 650, "est_protein_g": 22}, at(13) - timedelta(days=1))
+    Chat(coach, user, chat_model).send("Summarize Oct 6", 9, 0, [
+        call("day_summary", day_text="Oct 6"), say("Oct 6: about 650 kcal, a short strength session, readiness 86.")])
+    result = last_tool_result(chat_model, "day_summary")
+    assert (result["day"], result["food"]["kcal"], result["readiness"]) == ("Tue Oct 6", 650, 86)
+    assert [w["workout"] for w in result["training"]["workouts"]] == ["Strength"]
+
+
+def an_old_question(hours_ago: float, text="Logged the smoothie.\nWant an estimate for that smoothie?"):
+    asked = at(8) - timedelta(hours=hours_ago)
+    session = db.add_chat_session(1, asked, "session-1-old")
+    db.add_message(1, session["id"], asked, "assistant", text)
+
+
+def test_m4_3_a_bare_yes_the_next_morning_is_checked_first(coach, user, chat_model):
+    an_old_question(hours_ago=20 + 52 / 60)                                       # yesterday 11:08am
+    chat = Chat(coach, user, chat_model)
+    reply = chat.send("Yes", 8, 0)
+    assert reply == CONFIRM_PREVIOUS.format(when="yesterday at 11:08am", question="Want an estimate for that smoothie?")
+    assert chat_model.seen == [] and db.pending_plan(1) is None                   # no model call, no check-in
+    chat.send("yes, the smoothie", 8, 1, [say("A banana-berry smoothie is about 250 kcal and 5 g protein.")])
+    assert "Want an estimate for that smoothie?" in system_seen(chat_model)       # the old question is in view
+
+
+def test_m4_3_a_yes_within_12_hours_goes_to_the_agent_with_the_question(coach, user, chat_model):
+    an_old_question(hours_ago=10)
+    Chat(coach, user, chat_model).send("yes", 8, 0, [say("A banana-berry smoothie is about 250 kcal.")])
+    assert "Your last message before this conversation" in system_seen(chat_model)
+
+
+def test_m4_3_an_old_question_is_not_shown_after_24_hours(coach, user, chat_model):
+    an_old_question(hours_ago=25)
+    Chat(coach, user, chat_model).send("yes", 8, 0, [say("Yes to what? Tell me what you'd like.")])
+    assert "Your last message before this conversation" not in system_seen(chat_model)
+
+
+def test_m4_4_a_general_question_never_offers_to_look_it_up(coach, user, chat_model):
+    reply = Chat(coach, user, chat_model).send("How much caffeine is in a 12 oz Celsius?", 10, 0, [
+        say("About 200 mg (approximate). Want me to look it up?"),
+        say("About 200 mg of caffeine in a 12 oz Celsius (approximate).")])           # the rewrite
+    assert reply == "About 200 mg of caffeine in a 12 oz Celsius (approximate)."
+    assert food_today(user) == []
+
+
+def test_m4_5_a_workout_oura_never_saw_gets_the_ring_note_and_an_offer(coach, user, chat_model, patch_oura):
+    patch_oura()
+    chat = Chat(coach, user, chat_model)
+    reply = chat.send("I did 49 min HIIT at 10:37", 12, 0, [
+        call("mark_done", feeling=None, workout_type="HIIT", minutes=49, start_time_text="10:37"), say("")])
+    assert reply == f"Oura doesn't have it. {RING_ONLY} Want me to add 49 min of HIIT at 10:37am?"
+    chat.send("yes", 12, 1, [call("add_manual_workout", workout_type="HIIT", minutes=49, start_time_text="10:37",
+                                  feeling=None), say("Added: HIIT 10:37–11:26am.")])
+    [w] = Health(use_fixtures=True).manual.workouts(user, at(12).date())
+    assert (w["workout_type"], w["start"][11:16], w["minutes"]) == ("HIIT", "10:37", 49)
+
+
+def test_m4_5_oura_has_it_says_so_and_adds_nothing(coach, user, chat_model, patch_oura):
+    patch_oura(workouts=[("running", "10:37", "11:20")])
+    reply = Chat(coach, user, chat_model).send("I ran at 10:37", 12, 0, [
+        call("mark_done", feeling=None, workout_type="easy_run", minutes=None, start_time_text="10:37"), say("")])
+    assert reply == "Oura has it: run 10:37–11:20am."
+    assert Health(use_fixtures=True).manual.workouts(user, at(12).date()) == []
+
+
+def test_m4_6_the_lowest_protein_day_this_week(coach, user, chat_model):
+    eat(-2, 30)
+    eat(-1, 15)                                                                   # Tuesday: the lowest
+    eat(0, 5)                                                                     # today, still going
+    Chat(coach, user, chat_model).send("Which day this week was I lowest on protein?", 18, 0, [
+        call("food_totals", nutrients=["protein_g"], start_text="this week"), say("Tuesday, with 15 g.")])
+    result = last_tool_result(chat_model, "food_totals")
+    assert result["lowest_day"]["protein_g"] == {"day": "Tue Oct 6", "value": 15}
+    assert result["today_so_far"]["protein_g"] == 5
+
+
+def test_m4_7_how_did_i_sleep_this_week(coach, user, chat_model):
+    Chat(coach, user, chat_model).send("How did I sleep this week?", 9, 0, [
+        call("health_range", metrics=["sleep_score", "sleep_hours"], start_text="this week"),
+        say("Sleep score averaged 78 this week, best on Tuesday (90).")])
+    result = last_tool_result(chat_model, "health_range")
+    assert [d["sleep_score"] for d in result["per_day"]] == [67, 90, 78]           # Mon-Wed in the fixtures
+    assert result["average"]["sleep_score"] == 78.3
+
+
+def workouts_except_fridays(weeks=4):
+    """Manual workouts every day of the last `weeks` weeks except Fridays (the fixtures have no Friday workout)."""
+    for back in range(1, weeks * 7):
+        day = at(7) - timedelta(days=back)
+        if day.weekday() != 4:
+            db.add_manual_workout(1, "strength", day, day + timedelta(minutes=40), 40, None)
+
+
+def test_m4_7b_which_days_do_i_usually_skip(coach, user, chat_model):
+    workouts_except_fridays()
+    Chat(coach, user, chat_model).send("Which days do I usually skip workouts?", 9, 0, [
+        call("workouts", start_text="last 4 weeks", group_by="weekday"), say("Fridays: no workout on any of the last 4.")])
+    result = last_tool_result(chat_model, "workouts")
+    assert result["by_weekday"]["most_often_without_a_workout"] == ["Friday"]
+    assert result["by_weekday"]["weekdays"]["Friday"] == {"days": 4, "with_a_workout": 0, "without": 4,
+                                                          "planned_but_not_done": 0}
+
+
+def test_m4_7c_best_sleep_this_month_and_what_was_different(coach, user, chat_model):
+    Chat(coach, user, chat_model).send("When did I sleep best this month, and what was different that day?", 9, 0, [
+        call("health_range", metrics=["sleep_score"], start_text="this month", compare_days=True),
+        say("Best on Tuesday (90): you went to bed much earlier than usual.")])
+    best = last_tool_result(chat_model, "health_range")["best_and_worst"]["sleep_score"]["best"]
+    assert (best["day"], best["value"]) == ("Tue Oct 6", 90)
+    assert any("went to bed at 9:53pm" in d and "earlier than usual" in d for d in best["what_was_different"])
+
+
+PUSHBACK = {
+    "M4-8": ("I'll do HIIT twice today to make up for yesterday",
+             "Two HIIT sessions in one day mostly adds fatigue. One good session now, or HIIT plus an easy walk "
+             "tonight. Which one?"),
+    "M4-9": ("Should I skip dinner to hit my deficit?",
+             "I wouldn't: skipping dinner usually backfires and costs protein. A lighter dal and veg dinner keeps you "
+             "on target. Want ideas for that?"),
+    "M4-10": ("Going for a 2-hour run after 5 hours of sleep",
+              "Five hours is short, so two hours will feel rough. An easy 45 minutes, or the long run tomorrow after "
+              "a full night. Your call?"),
+}
+
+
+@pytest.mark.parametrize("scenario", sorted(PUSHBACK))
+def test_m4_8_9_10_pushback_is_kind_with_options(coach, user, chat_model, scenario):
+    message, draft = PUSHBACK[scenario]
+    reply = Chat(coach, user, chat_model).send(message, 9, 0, [say(draft)])
+    assert reply == draft and reply.rstrip().endswith("?") and not GUILT.search(reply)
+    assert_rules(reply)
 
 
 @live
-@M4
 def test_live_m4_1_protein_over_the_last_week(coach, user):
-    for back in range(7):
-        db.add_food(1, "dal and rice", {"entry_type": "meal", "est_calories": 600, "est_protein_g": 20 + back},
-                    at(13) - timedelta(days=back))
+    a_week_of_dal()
     reply = Chat(coach, user).send("How much protein did I have over the last week?", 18, 0)
     assert "161" in reply and "23" in reply                                      # total 161 g, 23 g a day
 
 
 @live
-@M4
 def test_live_m4_2_summarize_a_day(coach, user):
     db.add_food(1, "rajma chawal", {"entry_type": "meal", "est_calories": 650, "est_protein_g": 22}, at(13) - timedelta(days=1))
     reply = Chat(coach, user).send("Summarize Oct 6", 9, 0)
@@ -1452,26 +1604,69 @@ def test_live_m4_2_summarize_a_day(coach, user):
 
 
 @live
-@M4
 def test_live_m4_3_a_yes_the_next_morning(coach, user):
-    session = db.add_chat_session(1, at(11, 8) - timedelta(days=1), "session-1-old")
-    db.add_message(1, session["id"], at(11, 8) - timedelta(days=1), "assistant", "Want an estimate for that smoothie?")
+    an_old_question(hours_ago=20 + 52 / 60, text="Want an estimate for that smoothie?")
     reply = Chat(coach, user).send("Yes", 8, 0)
     assert db.pending_plan(1) is None and ("estimate" in reply.lower() or "smoothie" in reply.lower())
 
 
 @live
-@M4
 def test_live_m4_4_caffeine_in_a_celsius(coach, user):
-    reply = Chat(coach, user).send("How much caffeine is in a 12 oz Celsius?", 10, 0)
+    chat = Chat(coach, user)
+    reply = chat.send("How much caffeine is in a 12 oz Celsius?", 10, 0)
+    chat.print("scenario M4-4: caffeine in a Celsius")
     assert re.search(r"\b2\d\d\s*mg\b", reply) and not re.search(r"look (it )?up|brows|search", reply, re.I)
+    assert food_today(user) == []
 
 
 @live
-@M4
 def test_live_m4_5_a_workout_oura_never_saw(coach, user):
-    reply = Chat(coach, user).send("I did 49 min HIIT at 10:37", 12, 0)
+    chat = Chat(coach, user)
+    reply = chat.send("I did 49 min HIIT at 10:37", 12, 0)
+    chat.print("scenario M4-5: a workout Oura never saw")
     assert "ring" in reply.lower() and "nothing new came in" not in reply.lower()
+
+
+@live
+def test_live_m4_6_lowest_protein_day(coach, user):
+    eat(-2, 30)
+    eat(-1, 15)
+    eat(0, 5)
+    reply = Chat(coach, user).send("Which day this week was I lowest on protein?", 18, 0)
+    assert re.search(r"tue", reply, re.I) and "15" in reply
+
+
+@live
+def test_live_m4_7_sleep_this_week(coach, user):
+    reply = Chat(coach, user).send("How did I sleep this week?", 9, 0)
+    assert re.search(r"\b(78|67|90)\b", reply), reply                          # numbers from health_range
+    assert_answered("How did I sleep this week?", reply)
+
+
+@live
+def test_live_m4_7b_which_days_do_i_skip(coach, user):
+    workouts_except_fridays()
+    reply = Chat(coach, user).send("Which days do I usually skip workouts?", 9, 0)
+    assert re.search(r"friday", reply, re.I), reply
+
+
+@live
+def test_live_m4_7c_best_sleep_and_what_was_different(coach, user):
+    reply = Chat(coach, user).send("When did I sleep best this month, and what was different that day?", 9, 0)
+    assert re.search(r"oct 6|tuesday|tue", reply, re.I) and re.search(r"bed|earlier", reply, re.I), reply
+
+
+@live
+@pytest.mark.parametrize("scenario", sorted(PUSHBACK))
+def test_live_m4_8_9_10_pushback(coach, user, scenario):
+    message = PUSHBACK[scenario][0]
+    chat = Chat(coach, user)
+    reply = chat.send(message, 9, 0)
+    chat.print(f"scenario {scenario}: pushback")
+    verdict = judge_pushback(message, reply)
+    assert verdict.noticed and verdict.honest_call and verdict.options and verdict.their_choice, verdict.reason
+    assert not verdict.guilt and not GUILT.search(reply), verdict.reason
+    assert_rules(reply, set())
 
 
 @live
@@ -1550,11 +1745,19 @@ COVERAGE = {
     "37": ("test_37_a_low_readiness_rest_day_is_full_credit_without_using_the_budget",
            "test_live_34_37_a_low_readiness_rest_day"),
     "38": ("test_38_a_travel_fact_makes_a_rest_day_a_recovery_rest", "test_live_38_travel_rest_day"),
-    "M4-1": (None, "test_live_m4_1_protein_over_the_last_week"),
-    "M4-2": (None, "test_live_m4_2_summarize_a_day"),
-    "M4-3": (None, "test_live_m4_3_a_yes_the_next_morning"),
-    "M4-4": (None, "test_live_m4_4_caffeine_in_a_celsius"),
-    "M4-5": (None, "test_live_m4_5_a_workout_oura_never_saw"),
+    "M4-1": ("test_m4_1_protein_over_the_last_week_is_the_codes_sum", "test_live_m4_1_protein_over_the_last_week"),
+    "M4-2": ("test_m4_2_summarize_a_day", "test_live_m4_2_summarize_a_day"),
+    "M4-3": ("test_m4_3_a_bare_yes_the_next_morning_is_checked_first", "test_live_m4_3_a_yes_the_next_morning"),
+    "M4-4": ("test_m4_4_a_general_question_never_offers_to_look_it_up", "test_live_m4_4_caffeine_in_a_celsius"),
+    "M4-5": ("test_m4_5_a_workout_oura_never_saw_gets_the_ring_note_and_an_offer",
+             "test_live_m4_5_a_workout_oura_never_saw"),
+    "M4-6": ("test_m4_6_the_lowest_protein_day_this_week", "test_live_m4_6_lowest_protein_day"),
+    "M4-7": ("test_m4_7_how_did_i_sleep_this_week", "test_live_m4_7_sleep_this_week"),
+    "M4-7b": ("test_m4_7b_which_days_do_i_usually_skip", "test_live_m4_7b_which_days_do_i_skip"),
+    "M4-7c": ("test_m4_7c_best_sleep_this_month_and_what_was_different", "test_live_m4_7c_best_sleep_and_what_was_different"),
+    "M4-8": ("test_m4_8_9_10_pushback_is_kind_with_options", "test_live_m4_8_9_10_pushback"),
+    "M4-9": ("test_m4_8_9_10_pushback_is_kind_with_options", "test_live_m4_8_9_10_pushback"),
+    "M4-10": ("test_m4_8_9_10_pushback_is_kind_with_options", "test_live_m4_8_9_10_pushback"),
 }
 
 
@@ -1563,14 +1766,10 @@ def _marks(test) -> set[str]:
 
 
 def test_every_scenario_in_the_doc_has_a_scripted_and_a_live_test():
-    ids = re.findall(r"^- \*\*([0-9]+[a-z]?|M4-\d)\b", SCENARIOS_DOC.read_text(), re.M)
+    ids = re.findall(r"^- \*\*([0-9]+[a-z]?|M4-\d+[a-z]?)\b", SCENARIOS_DOC.read_text(), re.M)
     assert sorted(ids) == sorted(COVERAGE), set(ids) ^ set(COVERAGE)
     tests = globals()
     for scenario, (scripted, live_name) in COVERAGE.items():
         live_test = tests[live_name]
         assert "live_llm" in _marks(live_test), scenario
-        if scenario.startswith("M4"):
-            assert scripted is None and any(m.name == "xfail" and m.kwargs.get("reason") == "M4"
-                                            for m in live_test.pytestmark), scenario
-        else:
-            assert scripted in tests and "live_llm" not in _marks(tests[scripted]), scenario
+        assert scripted in tests and "live_llm" not in _marks(tests[scripted]), scenario

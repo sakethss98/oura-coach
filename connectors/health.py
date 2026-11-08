@@ -33,6 +33,16 @@ class Health:
         """Re-fetch Oura now; True if anything changed."""
         return self.oura.refresh(user, day, now)
 
+    def history(self, user, start: date, end: date, now: datetime | None = None) -> dict[str, dict]:
+        """{YYYY-MM-DD: daily metrics} for every day in start..end (one Oura fetch; missing days are all None)."""
+        raw = self.oura.history(user, start, end, now)
+        days = [start + timedelta(days=i) for i in range((end - start).days + 1)]
+        return {d.isoformat(): daily_metrics(raw, d, user.tz) for d in days}
+
+    def manual_by_day(self, user, start: date, end: date) -> dict[str, list[dict]]:
+        days = [start + timedelta(days=i) for i in range((end - start).days + 1)]
+        return {d.isoformat(): self.manual.workouts(user, d) for d in days}
+
     # --- what the training planner needs in one call -------------------------
 
     def bundle(self, user, day: date, refresh: bool = False, now: datetime | None = None,

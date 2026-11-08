@@ -143,6 +143,7 @@ def day_context(user, day: date, now: datetime, oura: dict, schedule: dict, band
         "remaining": remaining(targets["targets"], totals["today"]),
         "recent_food": recent_food(food_today, now),
         "saved_memory": memory.for_prompt(user, day),
+        "context_caps": memory.intensity_caps(user, day),
         "recent_meal_ideas": recent_meal_ideas(user, day),
         "first_plan_today": db.count_planned(user.id, day) == 0,
         "next_split_day": activity.next_split_day(db.done_strength_plans(user.id), goals["strength"]["split"]),

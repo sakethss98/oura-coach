@@ -164,6 +164,7 @@ def _policy_ctx(state: CoachState) -> dict:
         "max_hard_days_per_week": rules["max_hard_days_per_week"],
         "recent_food": c["recent_food"],
         "recent_food_caps": state["goals"]["recent_food_caps"],
+        "context_caps": c.get("context_caps", []),
         "window": c["window"],
     }
 

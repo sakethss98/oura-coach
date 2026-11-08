@@ -43,6 +43,7 @@ def oura_items(workouts: list[dict], rules: dict) -> list[dict]:
             "start": _dt(w["start"]),
             "end": _dt(w["end"]),
             "minutes": w["minutes"],
+            "km": w.get("distance_km"),
             "is_walk": w["activity"] == OURA_WALK,
             "hard": bool(hard_rule) and w["minutes"] >= hard_rule["min_minutes"],
             "feeling": None,
@@ -141,6 +142,8 @@ def merge_activity(oura: list[dict], sessions: list[dict]) -> list[dict]:
             "start": min(o["start"] for o in matches),
             "end": max(o["end"] for o in matches),
             "minutes": sum(o["minutes"] for o in matches),
+            "km": (sum(o["km"] for o in matches if o.get("km") is not None)
+                   if any(o.get("km") is not None for o in matches) else None),
             "hard": s["hard"] or any(o["hard"] for o in matches),
         })
     merged.extend(remaining)

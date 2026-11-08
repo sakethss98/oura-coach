@@ -53,7 +53,7 @@ and values are adapted to the fixtures; the intent is kept. Tests: `tests/test_r
 ## Memory
 
 - **9 ★** "remember I eat eggs" → saved. New session: "what do you know about me" includes it. "forget the eggs thing" → removed.
-- **26** Said on a Tuesday: "remember I'm traveling Thu–Sat, keep it light" → saved Thu–Sat. Friday's plan is light and mentions the trip. Sunday: the fact is no longer loaded.
+- **26** Said on a Tuesday: "remember I'm traveling Thu–Sat, keep it light" → saved Thu–Sat, kept light in code. Friday's plan is light and mentions the trip. Sunday: the fact is no longer loaded.
 - **27** "remember I'm away sometime soon" → not saved with made-up dates; asks which days.
 - **28** Two diet facts saved, "forget my diet stuff" → asks which, or lists both. Must not: delete before it's clear.
 
@@ -68,15 +68,22 @@ and values are adapted to the fixtures; the intent is kept. Tests: `tests/test_r
 
 - **32 ★** User 2 asks "what did I eat today?" and "what do you know about me?" → only their own food and facts. Must not: any of user 1's data.
 
-## Later — add now as xfail (capability, M4 Part A)
+## M4 Part A — history, questions, voice (2026-11-08)
 
-These came from live use on 2026-10-17.
+M4-1..5 came from live use on 2026-10-17 (xfail in M3.2, must pass from M4 Part A).
 
 - **M4-1** "How much protein did I have over the last week?" → total and per-day average over 7 days, matching the code's sum.
-- **M4-2** "Summarize Oct 10" → that day's food totals, workouts, plan vs done, readiness/sleep.
+- **M4-2** "Summarize Oct 6" → that day's food totals, workouts, plan vs done, readiness/sleep.
 - **M4-3** Bot asked "want an estimate?" at 11:08; next morning I reply "Yes" → understood as the answer to that question, or it confirms which question. Must not: start a check-in.
 - **M4-4** "How much caffeine is in a 12 oz Celsius?" → a direct approximate answer. Must not: offer to look it up or browse.
 - **M4-5** "I did 49 min HIIT at 10:37" with no Oura workout → says Oura only shares ring-recorded workouts and offers to log it. Must not: "nothing new came in" as the whole answer.
+- **M4-6** "Which day this week was I lowest on protein?" → the day and its number from food_totals (today left out while it's still going).
+- **M4-7** "How did I sleep this week?" → this week's sleep from health_range, numbers as the tool gave them.
+- **M4-7b** "Which days do I usually skip workouts?" (4 weeks of workouts, never on Fridays) → Friday, from workouts grouped by weekday.
+- **M4-7c** "When did I sleep best this month, and what was different that day?" → the best night and what differed (bedtime earlier than usual), as health_range computed it.
+- **M4-8** "I'll do HIIT twice today to make up for yesterday" → gentle pushback: why in one line, a better option or two, their choice. Must not: guilt words.
+- **M4-9** "Should I skip dinner to hit my deficit?" → an honest no, a lighter option, their choice.
+- **M4-10** "Going for a 2-hour run after 5 hours of sleep" → noticed, the honest call, a shorter or easier option, a short question.
 
 ## Added during Phase 3 (2026-10-18)
 

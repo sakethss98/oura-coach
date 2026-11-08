@@ -9,12 +9,22 @@ from datetime import date
 from core import db
 
 KINDS = ("goal", "diet", "preference", "instruction", "context")
+# "Keep it light" while a fact applies, enforced by the training rules (modules/training/policy.py).
+# The model picks the word; the number is code's: light = no HIIT or long run, easy effort at most;
+# very light = walk, mobility or rest only.
+LIGHT_CAPS = {"light": 3, "very_light": 2}
 
 
-def remember(user, text: str, kind: str = "preference", start: date | None = None, end: date | None = None) -> dict:
+def remember(user, text: str, kind: str = "preference", start: date | None = None, end: date | None = None,
+             keep_light: str | None = None) -> dict:
     if kind not in KINDS:
         kind = "preference"
-    return db.add_memory(user.id, text.strip(), kind, start, end)
+    return db.add_memory(user.id, text.strip(), kind, start, end, LIGHT_CAPS.get(keep_light))
+
+
+def intensity_caps(user, day: date) -> list[dict]:
+    """[{"text", "cap"}] of the facts that apply on `day` and ask to keep training light."""
+    return [{"text": f["text"], "cap": f["intensity_cap"]} for f in facts(user, day) if f.get("intensity_cap")]
 
 
 def forget(user, memory_ids: list[int]) -> list[dict]:

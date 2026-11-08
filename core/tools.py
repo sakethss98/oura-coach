@@ -7,8 +7,8 @@ model; text the person should see exactly as built goes in the artifact as {"ver
 import json
 import re
 from dataclasses import dataclass
-from datetime import date, datetime
-from typing import Annotated
+from datetime import date, datetime, timedelta
+from typing import Annotated, Literal
 
 from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
@@ -16,9 +16,10 @@ from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
 
 from connectors.health import Health
-from core import memory, score, users
+from core import db, history, memory, score, users
 from core.day import day_of
-from core.timeparse import resolve_dates, resolve_past_day
+from core.timeparse import resolve_dates, resolve_past_day, resolve_range
+from modules.registry import enabled_modules
 import today   # the shared day view (root module, also used by the training planner)
 
 
@@ -55,14 +56,43 @@ def ids_shown(messages: list, tool_names: set[str]) -> set[int]:
     return found
 
 
+GroupBy = Literal["weekday", "week"] | None
+# How every range tool reads its days (the same words in each tool's description).
+RANGE_ARGS = ("days_back: a number of days ending today (\"over the last week\" / \"past 7 days\" = 7), or null. "
+              "start_text / end_text: the days exactly as they said them (\"this week\", \"last week\", \"this month\", "
+              "\"Oct 1\" to \"Oct 10\"), or null. group_by: \"weekday\" or \"week\" for patterns, or null.")
+
+
+def with_range_args(func):
+    """Appends RANGE_ARGS to a tool's description (put it under @tool), so each range tool explains them."""
+    func.__doc__ = func.__doc__.rstrip() + "\n    " + RANGE_ARGS
+    return func
+
+
+def range_for(t: Turn, days_back: int | None, start_text: str | None, end_text: str | None):
+    """(start, end, note) of the range they asked about, or a result explaining it couldn't be read."""
+    found = resolve_range(days_back, start_text, end_text, t.day)
+    if found is None:
+        return {"reason": f"Could not read the days {start_text!r} to {end_text!r} (or they are in the future). "
+                          "Ask which days, like 'this week' or 'Oct 1 to Oct 10'."}
+    return found
+
+
+def range_label(start: date, end: date) -> str:
+    return f"{start:%a %b} {start.day}" if start == end else f"{start:%a %b} {start.day} to {end:%a %b} {end.day}"
+
+
 # --- saved memory -------------------------------------------------------------
 
 @tool
-def remember(fact: str, kind: str, start_text: str | None, end_text: str | None, config: RunnableConfig) -> str:
+def remember(fact: str, kind: str, start_text: str | None, end_text: str | None, config: RunnableConfig,
+             keep_light: Literal["light", "very_light"] | None = None) -> str:
     """Save a fact the person explicitly asked you to remember.
 
     kind: goal, diet, preference, instruction, or context (temporary, usually with dates).
     start_text / end_text: the first and last day exactly as written ("Thu", "Sat", "tomorrow"), or null.
+    keep_light: "light" when they want training kept light while it applies ("traveling, keep it light": no
+    HIIT or long runs), "very_light" when only walking, mobility or rest makes sense ("I'm sick"), else null.
     """
     t = turn(config)
     start = end = None
@@ -72,8 +102,9 @@ def remember(fact: str, kind: str, start_text: str | None, end_text: str | None,
             return as_json({"saved": False, "reason": f"Could not read the dates {start_text!r}-{end_text!r}. "
                                                       "Ask them to say the days again, like Thu-Sat or Oct 12."})
         start, end = dates
-    fact_row = memory.remember(t.user, fact, kind, start, end)
-    return as_json({"saved": True, "id": fact_row["id"], "fact": memory.describe(fact_row)})
+    fact_row = memory.remember(t.user, fact, kind, start, end, keep_light)
+    return as_json({"saved": True, "id": fact_row["id"], "fact": memory.describe(fact_row),
+                    **({"workouts_kept_light": True} if fact_row["intensity_cap"] else {})})
 
 
 # Words that make removing several facts at once clearly what they asked for.
@@ -138,9 +169,13 @@ def refresh_health(config: RunnableConfig) -> str:
     health = Health(t.use_fixtures)
     changed = health.refresh(t.user, t.day, t.now)
     workouts = health.oura.workouts(t.user, t.day)
-    return as_json({"anything_new": changed, "readiness": health.readiness(t.user, t.day)["score"],
-                    "oura_workouts_today": [{"activity": w["activity"], "start": w["start"][11:16],
-                                             "end": w["end"][11:16]} for w in workouts]})
+    result = {"anything_new": changed, "readiness": health.readiness(t.user, t.day)["score"],
+              "oura_workouts_today": [{"activity": w["activity"], "start": w["start"][11:16],
+                                       "end": w["end"][11:16]} for w in workouts]}
+    if not workouts:
+        result["note"] = ("If they said they worked out: Oura only shares workouts the ring recorded (Apple Watch "
+                          "sessions don't come through). Say that and offer to add it (mark_done with what they said).")
+    return as_json(result)
 
 
 @tool
@@ -162,7 +197,64 @@ def get_score(day: str | None, config: RunnableConfig) -> str:
     })
 
 
-CORE_TOOLS = [remember, forget, list_memory, get_today, get_score, refresh_health]
+HealthMetric = Literal["readiness", "sleep_score", "sleep_hours", "hrv", "resting_hr", "steps"]
+
+
+@tool
+@with_range_args
+def health_range(config: RunnableConfig, metrics: list[HealthMetric] | None = None, days_back: int | None = None,
+                 start_text: str | None = None, end_text: str | None = None, group_by: GroupBy = None,
+                 compare_days: bool = False) -> str:
+    """Readiness, sleep, HRV, resting heart rate and steps over a range of days, with averages ("how did I sleep
+    this week?"). compare_days: true to get the best and worst day and what was different about each ("when did
+    I sleep best this month, and what was different that day?"). metrics: which ones, or null for readiness and
+    sleep. At most the last 90 days."""
+    t = turn(config)
+    found = range_for(t, days_back, start_text, end_text)
+    if isinstance(found, dict):
+        return as_json(found)
+    start, end, note = found
+    health = Health(t.use_fixtures)
+    first = start - timedelta(days=1)           # the day before the range: what led into its first night
+    by_day = health.history(t.user, first, end, t.now)
+    features = None
+    if compare_days:
+        days = [first + timedelta(days=i) for i in range((end - first).days + 1)]
+        summaries = {m.name: m.daily_summaries(t.user, days, by_day) for m in enabled_modules(t.user, health=health)}
+        features = {d.isoformat(): history.features(d, by_day, summaries.get("training"), summaries.get("nutrition"))
+                    for d in days[1:]}
+    result = history.summarize(by_day, start, end, list(metrics or []), group_by, features)
+    return as_json({"range": range_label(start, end), **({"note": note} if note else {}), **result})
+
+
+@tool
+def day_summary(day_text: str, config: RunnableConfig) -> str:
+    """What happened on one day: food totals, workouts and plans, readiness and sleep, and the final score
+    if there is one ("summarize Oct 6"). day_text: the day exactly as they said it."""
+    t = turn(config)
+    d = resolve_past_day(day_text, t.day)
+    if d is None:
+        return as_json({"day": None, "reason": f"Could not read the day {day_text!r}. Ask which day."})
+    health = Health(t.use_fixtures)
+    m = health.history(t.user, d, d, t.now)[d.isoformat()]
+    summaries = {mod.name: mod.daily_summaries(t.user, [d], {d.isoformat(): m})[d.isoformat()]
+                 for mod in enabled_modules(t.user, health=health)}
+    data = {"day": range_label(d, d), **({"note": "today, still going"} if d == t.day else {}),
+            "readiness": m["readiness_score"], "sleep_score": m["sleep_score"], "sleep_hours": m["sleep_hours"],
+            "hrv_ms": m["hrv_ms"], "resting_hr": m["resting_hr"], "steps": m["steps"]}
+    if "nutrition" in summaries:
+        f = summaries["nutrition"]
+        data["food"] = ({"entries": f["entries"], "kcal": round(f["calories"]), "protein_g": round(f["protein_g"]),
+                         "carbs_g": round(f["carbs_g"]), "fiber_g": round(f["fiber_g"])}
+                        if f["entries"] else "nothing logged")
+    if "training" in summaries:
+        data["training"] = summaries["training"]
+    stored = db.get_daily_score(t.user.id, d)
+    data["score"] = stored["score"] if stored and stored["final"] else None
+    return as_json(data)
+
+
+CORE_TOOLS = [remember, forget, list_memory, get_today, get_score, refresh_health, health_range, day_summary]
 CORE_HELP = ['"remember I eat eggs", "forget that", "what do you know about me?"',
              '"how\'s my day?": your score so far, against your own recent average',
              '"what\'s left to eat today?", "update from Oura"']

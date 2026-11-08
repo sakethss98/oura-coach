@@ -6,7 +6,7 @@ change gets one question first (`awaiting_confirm`, answered with confirm_overri
 2 hours it expires and nothing is planned). Plan messages and questions are built by code and sent as
 they are (artifact {"verbatim": text}).
 """
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Literal
 
 from langchain_core.runnables import RunnableConfig
@@ -16,11 +16,12 @@ from connectors.health import Health
 from connectors.manual import ManualSource
 from core import db
 from core.config import CONSULT_TTL_MIN
-from core.labels import clock, clock_range, workout_label
+from core.labels import clock, clock_range, oura_label, workout_label, workout_phrase
 from core.timeparse import parse_clock_time
-from core.tools import Messages, as_json, turn
+from core.tools import GroupBy, Messages, as_json, range_for, range_label, turn, with_range_args
 from langchain_core.messages import HumanMessage, ToolMessage
-from modules.training import checkin, planner
+from modules.training import checkin, history, planner
+from modules.training.activity import OURA_MATCHES, OURA_MATCH_SLACK
 from modules.training.blocks import blocks_of, default_minutes
 from modules.training.messages import format_plan, format_why, readiness_line
 from modules.training.schemas import DoneType
@@ -29,7 +30,8 @@ import today
 PLANNER = planner.build_graph()   # no checkpointer: a planner run never pauses
 CONSULT_TTL = timedelta(minutes=CONSULT_TTL_MIN)
 SKIPPED = {"energy": None, "soreness": None, "note": None, "constraints": [], "label": "skipped"}
-NO_OURA_MATCH = "Oura doesn't have a matching workout. Want me to add it with a time?"
+RING_ONLY = "Oura only shares workouts the ring recorded (Apple Watch sessions don't come through)."
+NO_OURA_MATCH = f"Oura doesn't have a matching workout. {RING_ONLY} Want me to add it with a time?"
 
 
 def expire_consults(t) -> list[dict]:
@@ -137,18 +139,48 @@ def confirm_override(choice: Literal["yes", "no"], messages: Messages, config: R
     return _plan_reply(planner.answer_consult(PLANNER, t.user, t.now, t.use_fixtures, pending, choice))
 
 
+def _offer(workout_type: str | None, minutes: int | None, start) -> str:
+    """"Want me to add 49 min of HIIT at 10:37am?" from what they said, or a plain "with a time?"."""
+    if workout_type is None:
+        return "Want me to add it with a time?"
+    return f"Want me to add {workout_phrase(workout_type, minutes)}{f' at {clock(start)}' if start else ''}?"
+
+
+def _oura_saw(t, workout_type: str | None, start) -> dict | None:
+    """Today's Oura workout that matches what they said they did (type, and time when they gave one)."""
+    allowed = OURA_MATCHES.get(workout_type) if workout_type else None
+    for w in Health(t.use_fixtures).oura.workouts(t.user, t.day):
+        begin = datetime.fromisoformat(w["start"])
+        if allowed is not None and w["activity"] not in allowed:
+            continue
+        if start is None or abs(begin - start) <= OURA_MATCH_SLACK:
+            return w
+    return None
+
+
 @tool(response_format="content_and_artifact")
-def mark_done(feeling: str | None, config: RunnableConfig) -> tuple[str, dict]:
-    """They finished today's planned workout ("done", "did the run"). feeling: how it felt, or null.
-    Only Oura's record counts here: fetches Oura again and marks what it recorded, with Oura's times.
-    The confirmation (or "Oura doesn't have a matching workout…") is sent to them as is."""
+def mark_done(feeling: str | None, config: RunnableConfig, workout_type: DoneType | None = None,
+              minutes: int | None = None, start_time_text: str | None = None) -> tuple[str, dict]:
+    """They did a workout: today's planned one ("done", "did the run") or another ("I did 49 min HIIT at 10:37").
+    Only Oura's record counts here: fetches Oura again and marks what it recorded, with Oura's times; when Oura
+    doesn't have it, it says why and offers to add it (then add_manual_workout on their yes). feeling: how it
+    felt, or null. workout_type, minutes, start_time_text: what they said they did, exactly as said, or null.
+    The text is sent to them as is."""
     t = turn(config)
     _sync(t, refresh=True)
+    stated_start = parse_clock_time(start_time_text, t.now)
     plan = next((p for p in reversed(db.plans_between(t.user.id, t.day, t.day))
                  if (p["plan_json"] or {}).get("workout_type") != "rest"), None)
     if plan is None:
-        return as_json({"done": False, "reason": "No workout planned today. Ask if they want it added as a workout "
-                                                 "(type, minutes, when) with add_manual_workout."}), {}
+        seen = _oura_saw(t, workout_type, stated_start)
+        if seen:
+            say = f"Oura has it: {oura_label(seen['activity']).lower()} {clock_range(seen['start'][11:16], seen['end'][11:16])}."
+        else:
+            say = f"Oura doesn't have it. {RING_ONLY} {_offer(workout_type, minutes, stated_start)}"
+        return (as_json({"done": [], "no_plan_today": True, "oura_has_it": seen is not None, "say": say,
+                         "note": "The say text was sent as is: do not repeat it. On their yes: add_manual_workout "
+                                 "with what they said."}),
+                {"verbatim": say, "wrote": False})
     if feeling:
         db.set_feeling(plan["id"], feeling)
     p, done = plan["plan_json"], plan["blocks_done"]
@@ -167,15 +199,16 @@ def mark_done(feeling: str | None, config: RunnableConfig) -> tuple[str, dict]:
     missing = [labels[i] for i in range(len(labels)) if i not in done]
     if missing:
         result["not_found"] = missing
-        said.append(NO_OURA_MATCH if len(labels) == 1 else
-                    f"Oura doesn't have a matching workout for the {' and '.join(missing).lower()}. "
-                    "Want me to add it with a time?")
+        offer = _offer(workout_type, minutes, stated_start)
+        said.append(f"Oura doesn't have a matching workout. {RING_ONLY} {offer}" if len(labels) == 1 else
+                    f"Oura doesn't have a matching workout for the {' and '.join(missing).lower()}. {RING_ONLY} "
+                    f"{offer}")
     if result["done"] and not missing and not feeling:
         said.append("How did it feel?")
     result["say"] = " ".join(said)
     result["note"] = ("The say text was sent to them as is: do not repeat it. Reply only if they asked something "
                       "else in the same message (answer that alone), otherwise reply with nothing.")
-    return as_json(result), {"verbatim": result["say"]}
+    return as_json(result), {"verbatim": result["say"], "wrote": bool(result["done"]) or bool(feeling)}
 
 
 @tool
@@ -215,4 +248,24 @@ def explain_plan(config: RunnableConfig) -> tuple[str, dict]:
     return "Explanation sent to them as is. Do not repeat it.", {"verbatim": format_why(db.latest_planned(t.user.id, t.day))}
 
 
-TOOLS = [start_checkin, submit_checkin, plan_workout, confirm_override, mark_done, add_manual_workout, explain_plan]
+@tool
+@with_range_args
+def workouts(config: RunnableConfig, days_back: int | None = None, start_text: str | None = None,
+             end_text: str | None = None, group_by: GroupBy = None) -> str:
+    """Workouts over a range of days (Oura, added in chat, and planned ones done), with totals, run distance and
+    the longest run ("what has my training looked like the last 2 weeks?"). group_by "weekday" answers "which
+    days do I usually skip workouts?". At most the last 90 days."""
+    t = turn(config)
+    found = range_for(t, days_back, start_text, end_text)
+    if isinstance(found, dict):
+        return as_json(found)
+    start, end, note = found
+    health, rules = Health(t.use_fixtures), t.user.goals()["activity"]
+    plans = history.plans_by_day(t.user, start, end)
+    items = history.activity_by_day(t.user, start, end, health.history(t.user, start, end, t.now),
+                                    health.manual_by_day(t.user, start, end), rules, plans)
+    result = history.summarize(items, plans, rules, t.day, group_by)
+    return as_json({"range": range_label(start, end), **({"note": note} if note else {}), **result})
+
+
+TOOLS = [start_checkin, submit_checkin, plan_workout, confirm_override, mark_done, add_manual_workout, explain_plan, workouts]

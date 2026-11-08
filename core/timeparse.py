@@ -156,3 +156,65 @@ def resolve_past_day(text: str | None, today: date) -> date | None:
             if found > today:
                 return None
     return found if found <= today else None
+
+
+MAX_RANGE_DAYS = 90
+DEFAULT_RANGE_DAYS = 7
+_LAST_N = re.compile(r"^(?:the\s+)?(?:last|past)\s+(\d{1,3}|a|one|two|three|four|five|six|seven)\s+(days?|weeks?|months?)$")
+
+
+def _month_start(d: date) -> date:
+    return d.replace(day=1)
+
+
+def _whole_range(text: str, today: date) -> tuple[date, date] | None:
+    """A phrase that names a whole range by itself ("this week", "last month", "last 14 days")."""
+    monday = today - timedelta(days=today.weekday())
+    if text in {"this week", "the week", "week"}:
+        return monday, today
+    if text in {"the last week", "past week", "the past week"}:
+        return today - timedelta(days=6), today          # "over the last week" = the 7 days ending today
+    if text in {"last week", "previous week", "the previous week"}:
+        return monday - timedelta(days=7), monday - timedelta(days=1)   # "this week vs last week"
+    if text in {"this month", "the month", "month"}:
+        return _month_start(today), today
+    if text in {"last month", "previous month", "the last month"}:
+        end = _month_start(today) - timedelta(days=1)
+        return _month_start(end), end
+    match = _LAST_N.match(text)
+    if match:
+        n = _NUMBER_WORDS.get(match[1]) or int(match[1])
+        days = n * {"day": 1, "week": 7, "month": 30}[match[2].rstrip("s")]
+        return today - timedelta(days=days - 1), today
+    return None
+
+
+def resolve_range(days_back: int | None, start_text: str | None, end_text: str | None,
+                  today: date) -> tuple[date, date, str | None] | None:
+    """A past range as the person said it -> (first day, last day, note), both inclusive, never in the future.
+
+    days_back N = the N days ending today. start_text may name a whole range by itself ("this week" =
+    Monday..today, "last week" = the Monday-Sunday before it, "the last week" / "past week" = the 7 days
+    ending today, "this month", "last month",
+    "last 14 days"); otherwise start_text and end_text are single past days ("Oct 1", "last Monday"), and a
+    missing end is today. Nothing given = the last 7 days. Ranges longer than 90 days keep the newest
+    90 and say so in the note. None if a phrase can't be read or the range runs backwards.
+    """
+    start_text = (start_text or "").strip().lower().rstrip(".")
+    end_text = (end_text or "").strip().lower().rstrip(".")
+    if days_back:
+        start, end = today - timedelta(days=max(days_back, 1) - 1), today
+    elif start_text and not end_text and (whole := _whole_range(start_text, today)):
+        start, end = whole
+    elif start_text:
+        start = resolve_past_day(start_text, today)
+        end = resolve_past_day(end_text, today) if end_text else today
+        if start is None or end is None or end < start:
+            return None
+    else:
+        start, end = today - timedelta(days=DEFAULT_RANGE_DAYS - 1), today
+    note = None
+    if (end - start).days + 1 > MAX_RANGE_DAYS:
+        start = end - timedelta(days=MAX_RANGE_DAYS - 1)
+        note = f"Only the last {MAX_RANGE_DAYS} days are covered."
+    return start, end, note
