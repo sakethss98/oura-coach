@@ -7,6 +7,9 @@ graph TD;
 	__start__([<p>__start__</p>]):::first
 	ingest(ingest)
 	greet(greet)
+	confirm_previous(confirm_previous)
+	classify(classify)
+	decline(decline)
 	agent(agent)
 	tools(tools)
 	respond(respond)
@@ -14,8 +17,13 @@ graph TD;
 	__start__ --> ingest;
 	agent -. &nbsp;__end__&nbsp; .-> respond;
 	agent -.-> tools;
+	classify -.-> agent;
+	classify -. &nbsp;fixed reply&nbsp; .-> decline;
+	confirm_previous --> respond;
+	decline --> respond;
 	greet --> respond;
-	ingest -. &nbsp;anything else&nbsp; .-> agent;
+	ingest -. &nbsp;anything else&nbsp; .-> classify;
+	ingest -. &nbsp;stale yes&nbsp; .-> confirm_previous;
 	ingest -. &nbsp;greeting&nbsp; .-> greet;
 	tools --> agent;
 	respond --> __end__;

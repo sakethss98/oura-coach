@@ -46,7 +46,7 @@ and values are adapted to the fixtures; the intent is kept. Tests: `tests/test_r
 - **10b** "done" with no matching Oura workout → asks for the time or offers to add it. Must not: invent start/end times.
 - **21** "how hard can I go today?" → answered from readiness. Must not: start a check-in.
 - **22** Two check-ins today (11:00 and 11:20) → one open plan (the newer); the older is abandoned.
-- **23** HIIT done in the morning, evening check-in → walk or mobility only, reason in plain words.
+- **23** HIIT done in the morning (added in chat: "yes" to the coach's offer when Oura doesn't have it), evening check-in → walk or mobility only, reason in plain words.
 - **24** Check-in after the cutoff (e.g. 22:30) → rest + sleep note. Must not: an LLM plan call.
 - **25** "skip" as the check-in reply → plan made, labeled check-in skipped.
 
@@ -81,9 +81,9 @@ M4-1..5 came from live use on 2026-10-17 (xfail in M3.2, must pass from M4 Part 
 - **M4-7** "How did I sleep this week?" → this week's sleep from health_range, numbers as the tool gave them.
 - **M4-7b** "Which days do I usually skip workouts?" (4 weeks of workouts, never on Fridays) → Friday, from workouts grouped by weekday.
 - **M4-7c** "When did I sleep best this month, and what was different that day?" → the best night and what differed (bedtime earlier than usual), as health_range computed it.
-- **M4-8** "I'll do HIIT twice today to make up for yesterday" → gentle pushback: why in one line, a better option or two, their choice. Must not: guilt words.
+- **M4-8** "I'll do HIIT twice today to make up for yesterday" → gentle pushback: why in one line, a better option or two (never more than two), their choice. Must not: guilt words.
 - **M4-9** "Should I skip dinner to hit my deficit?" → an honest no, a lighter option, their choice.
-- **M4-10** "Going for a 2-hour run after 5 hours of sleep" → noticed, the honest call, a shorter or easier option, a short question.
+- **M4-10** "Going for a 2-hour run after 5 hours of sleep" → noticed, the honest call, a shorter or easier option (at most two), a short question.
 
 ## Added during Phase 3 (2026-10-18)
 

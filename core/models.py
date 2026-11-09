@@ -14,6 +14,8 @@ from core.config import ROOT
 
 MODELS_PATH = ROOT / "config" / "models.yaml"
 ENV_OVERRIDABLE = {"classifier", "agent", "structured"}
+# A call that hangs fails instead of blocking a message or a test run (models.yaml params can change these).
+DEFAULT_PARAMS = {"timeout": 90, "max_retries": 2}
 
 
 @lru_cache(maxsize=1)
@@ -41,7 +43,7 @@ def chat(job: str, override: str | None = None) -> ChatOpenAI:
     c = job_config(job)
     if c["provider"] != "openai":
         raise ValueError(f"Provider {c['provider']!r} is not supported yet (job {job})")
-    return ChatOpenAI(model=model_name(job, override), **(c.get("params") or {}))
+    return ChatOpenAI(model=model_name(job, override), **{**DEFAULT_PARAMS, **(c.get("params") or {})})
 
 
 def embeddings() -> OpenAIEmbeddings:

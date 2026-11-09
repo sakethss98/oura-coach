@@ -2,13 +2,19 @@
 
     ingest -> greet (whole-message greeting, code only) -------------> respond -> END
            -> confirm_previous (a bare "yes" to an old question, code) -> respond -> END
-           -> agent <-> tools (ToolNode, the user's enabled modules) -> respond -> END
+           -> classify -> decline (off_topic: a fixed line, code) -------> respond -> END
+                       -> agent <-> tools (ToolNode) -----------------> respond -> END
+
+classify picks 1-2 categories (core/classifier.py); each category is a skill file (skills/<name>.md) that
+gives the agent only its tools and its guidance for this turn. "other" = every tool and every skill's
+guidance (and the message is kept for review in unclassified_messages).
 
 One LangGraph thread per chat session (`session-{user_id}-{start}`, core/chat_sessions.py), so the
 agent sees this conversation and nothing older; saved memory and today's data come in through the
 system message every turn. The LLM decides what to do; numbers, rules and plan messages are code.
 Who and when (user_id, now, session_id, use_fixtures) come from the run config, never from the state.
 """
+import logging
 import re
 import time
 from datetime import timedelta
@@ -18,7 +24,8 @@ from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from connectors.health import Health
-from core import chat_sessions, db, memory, models, reply_rules, score
+from core import chat_sessions, classifier, db, memory, models, reply_rules, score
+from core import skills as skill_files
 from core.config import CONSULT_TTL_MIN
 from core.day import day_of
 from core.labels import clock
@@ -37,6 +44,10 @@ HISTORY_HUMAN_TURNS = 5      # the agent sees the conversation from the 5th-last
 # the agent's own line (e.g. "Logged 2 eggs.", or the answer to the rest of "done, what should I eat?")
 # is sent too, after the code-built text.
 WRITE_TOOLS = {"log_food", "edit_food", "remove_food", "remember", "forget", "add_manual_workout", "mark_done"}
+RECENT_FOR_CLASSIFIER = 6    # the classifier sees the last 6 messages (about 3 exchanges) before this one
+# A check-in answer or a yes/no workout question waiting belongs to this category, whatever the classifier says.
+PENDING_OWNER = "training"
+log = logging.getLogger(__name__)
 
 
 def make_model(override: str | None = None):
@@ -46,6 +57,7 @@ def make_model(override: str | None = None):
 
 def _log(kind: str, messages: list, output, t, response=None, started: float | None = None,
          override: str | None = None) -> None:
+    """One runs row for an agent call (job `agent`, with its model, tokens and latency)."""
     input_tokens, output_tokens = models.usage(response)
     db.log_run(kind, models.model_name("agent", override), _trace(messages), output, t.user.id, job="agent",
                input_tokens=input_tokens, output_tokens=output_tokens,
@@ -57,6 +69,7 @@ class AgentState(MessagesState):
     confirm_previous: bool  # a bare "yes" over 12 h after the question it may answer: ask which one first
     expired_checkin: bool   # a check-in question from an earlier session was left unanswered today
     code_reply: bool        # this turn's reply was built by code (greeting, confirmation): no reply rules
+    categories: list[str]   # this turn's skills (core/classifier.py), or ["other"]
 
 
 def all_tools() -> list:
@@ -96,9 +109,14 @@ def _quote(text: str) -> str:
     return text if len(words) <= QUOTE_MAX_WORDS else " ".join(words[:QUOTE_MAX_WORDS]) + "…"
 
 
-def system_prompt(t) -> str:
-    lines = [load_prompt("agent"), "",
-             f"Now: {t.now:%A %Y-%m-%d %H:%M}. Today (by their sleep): {t.day:%A %Y-%m-%d}."]
+def system_prompt(t, guidance: list[tuple[str, str]] = ()) -> str:
+    """The shared prompt, this turn's skill guidance [(name, body)], then time, facts and module summaries."""
+    lines = [load_prompt("agent")]
+    if guidance:
+        lines += ["", f"What to do for this message ({', '.join(name for name, _ in guidance)}):"]
+        for name, body in guidance:
+            lines += [f"[{name}]", body]
+    lines += ["", f"Now: {t.now:%A %Y-%m-%d %H:%M}. Today (by their sleep): {t.day:%A %Y-%m-%d}."]
     previous = chat_sessions.previous_question(t.user, t.session_id, t.now) if t.session_id else None
     if previous:
         lines.append(f"Your last message before this conversation (sent {previous['sent']:%a} "
@@ -161,19 +179,87 @@ def confirm_previous(state: AgentState, config) -> dict:
     return {"messages": [AIMessage(text)], "code_reply": True}
 
 
+def _conversation_before(messages: list) -> list[tuple[str, str]]:
+    """(role, text) of their messages and the coach's replies before their latest message."""
+    last_human = max(i for i, m in enumerate(messages) if isinstance(m, HumanMessage))
+    said = [("them" if isinstance(m, HumanMessage) else "coach", _text(m.content)) for m in messages[:last_human]
+            if isinstance(m, HumanMessage) or (isinstance(m, AIMessage) and not m.tool_calls and _text(m.content))]
+    return said[-RECENT_FOR_CLASSIFIER:]
+
+
+def _waiting_for_training(t) -> list[str]:
+    """What the training module is waiting for, in plain words (empty when nothing is)."""
+    notes = []
+    pending = db.pending_plan(t.user.id)
+    if pending and pending["date"] == t.day.isoformat():
+        notes.append("A check-in answer (energy 1-5 and soreness 0-5) is awaited.")
+    consult = db.pending_confirm(t.user.id)
+    if consult:
+        question = consult["requested_json"]["question"].splitlines()[-1]
+        notes.append(f"A yes/no answer is awaited to the coach's question: {question!r}")
+    elif db.expired_consult(t.user.id, t.day):
+        notes.append("A yes/no workout question from earlier today expired unanswered.")
+    return notes
+
+
+def classify(state: AgentState, config) -> dict:
+    """Pick this turn's categories. A failure never blocks the message: it goes to "other"."""
+    t = turn(config)
+    message = _text(state["messages"][-1].content)
+    training_notes = _waiting_for_training(t)
+    notes = list(training_notes)
+    previous = chat_sessions.previous_question(t.user, t.session_id, t.now) if t.session_id else None
+    if previous:
+        notes.append(f"The coach's last message before this conversation: {previous['question']!r}")
+    try:
+        route = classifier.classify(message, _conversation_before(state["messages"]), notes, t.user.id,
+                                    skill_files.load())
+    except Exception as e:
+        log.warning("Classifying the message failed: %s", type(e).__name__)
+        route = {"categories": [], "reason": f"classifier failed ({type(e).__name__})"}
+    categories = route["categories"]
+    if categories and training_notes and PENDING_OWNER not in categories and categories != ["off_topic"]:
+        categories = categories + [PENDING_OWNER]
+    if not categories:
+        db.add_unclassified(t.user.id, t.now, message, route["reason"])
+        categories = [skill_files.OTHER]
+    return {"categories": categories}
+
+
+def decline(state: AgentState, config) -> dict:
+    """A category with a fixed reply (off_topic): sent by code, no agent call, no tools."""
+    [skill] = skill_files.chosen(skill_files.load(), state["categories"])
+    return {"messages": [AIMessage(skill.decline)], "code_reply": True}
+
+
+def turn_setup(t, categories: list[str]) -> tuple[list, list[tuple[str, str]], str | None]:
+    """(tools, guidance, model override) for this turn's categories. Only the user's enabled modules' tools
+    are ever offered; "other" gets all of them and every skill's guidance."""
+    skills = skill_files.load()
+    enabled = CORE_TOOLS + [tool for m in enabled_modules(t.user) for tool in m.tools()]
+    picked = skill_files.chosen(skills, categories)
+    if not picked:
+        return enabled, [(s.name, s.body) for s in skills.values() if not s.decline], None
+    names = {name for s in picked for name in s.tools}
+    return ([tool for tool in enabled if tool.name in names], [(s.name, s.body) for s in picked],
+            next((s.model for s in picked if s.model), None))
+
+
 def agent(state: AgentState, config) -> dict:
     t = turn(config)
-    tools = CORE_TOOLS + [tool for m in enabled_modules(t.user) for tool in m.tools()]
-    messages = [SystemMessage(system_prompt(t))] + recent(state["messages"])
+    tools, guidance, override = turn_setup(t, state.get("categories") or [skill_files.OTHER])
+    messages = [SystemMessage(system_prompt(t, guidance))] + recent(state["messages"])
     started = time.perf_counter()
-    response = make_model().bind_tools(tools).invoke(messages)
-    _log("agent", messages, _trace([response]), t, response, started)
+    model = make_model(override)
+    response = (model.bind_tools(tools) if tools else model).invoke(messages)
+    _log("agent", messages, _trace([response]), t, response, started, override)
     return {"messages": [response]}
 
 
-def _within_rules(draft: str, tools_called: set[str], t) -> str:
-    """The draft if it follows the reply rules; else one rewrite by the model; else trimmed by code."""
-    problems = reply_rules.violations(draft, tools_called)
+def _within_rules(draft: str, tools_called: set[str], t, offered: set[str] | None = None) -> str:
+    """The draft if it follows the reply rules; else one rewrite by the model; else trimmed by code.
+    `offered` = the tools the agent had this turn (an offer to add or log needs one of them)."""
+    problems = reply_rules.violations(draft, tools_called, offered)
     if not problems:
         return draft
     request = (f"Rewrite this reply so it follows the rules. Problems: {'; '.join(problems)}. "
@@ -183,9 +269,10 @@ def _within_rules(draft: str, tools_called: set[str], t) -> str:
     response = make_model().invoke(messages)
     rewrite = _text(response.content)
     _log("agent_rewrite", messages, {"content": rewrite}, t, response, started)
-    if rewrite and not reply_rules.violations(rewrite, tools_called):
+    if rewrite and not reply_rules.violations(rewrite, tools_called, offered):
         return rewrite
-    return reply_rules.enforce(rewrite or draft, tools_called) or reply_rules.enforce(draft, tools_called)
+    return (reply_rules.enforce(rewrite or draft, tools_called, offered)
+            or reply_rules.enforce(draft, tools_called, offered))
 
 
 def respond(state: AgentState, config) -> dict:
@@ -197,6 +284,8 @@ def respond(state: AgentState, config) -> dict:
     verbatim = [m.artifact["verbatim"] for m in turn_messages
                 if isinstance(m, ToolMessage) and isinstance(m.artifact, dict) and m.artifact.get("verbatim")]
     draft = _text(final.content)
+    offered = None if state.get("code_reply") else {
+        tool.name for tool in turn_setup(t, state.get("categories") or [skill_files.OTHER])[0]}
 
     parts = []
     if state.get("code_reply"):
@@ -216,10 +305,10 @@ def respond(state: AgentState, config) -> dict:
         covered = writes <= built_by and bool(built_by - WRITE_TOOLS)
         repeats = any(draft and draft in v for v in verbatim)
         if draft and (writes or (no_write and asked)) and not covered and not repeats:
-            parts.append(_within_rules(draft, tools_called, t))
+            parts.append(_within_rules(draft, tools_called, t, offered))
     elif draft:
-        parts.append(_within_rules(draft, tools_called, t))
-    reply ="\n\n".join(p for p in parts if p) or NO_REPLY
+        parts.append(_within_rules(draft, tools_called, t, offered))
+    reply = "\n\n".join(p for p in parts if p) or NO_REPLY
     if state.get("expired_checkin"):
         reply += f"\n{EXPIRED_CHECKIN}"
     return {"messages": [AIMessage(content=reply, id=final.id)]}   # same id: replaces the draft in the thread
@@ -231,19 +320,29 @@ def after_ingest(state: AgentState) -> str:
     return "stale yes" if state["confirm_previous"] else "anything else"
 
 
+def after_classify(state: AgentState) -> str:
+    picked = skill_files.chosen(skill_files.load(), state["categories"])
+    return "fixed reply" if len(picked) == 1 and picked[0].decline else "agent"
+
+
 def build_agent(checkpointer=None):
+    skill_files.validate(skill_files.load(), {tool.name for tool in all_tools()})
     graph = StateGraph(AgentState)
     graph.add_node("ingest", ingest)
     graph.add_node("greet", greet)
     graph.add_node("confirm_previous", confirm_previous)
+    graph.add_node("classify", classify)
+    graph.add_node("decline", decline)
     graph.add_node("agent", agent)
     graph.add_node("tools", ToolNode(all_tools()))
     graph.add_node("respond", respond)
     graph.add_edge(START, "ingest")
     graph.add_conditional_edges("ingest", after_ingest, {"greeting": "greet", "stale yes": "confirm_previous",
-                                                         "anything else": "agent"})
+                                                         "anything else": "classify"})
+    graph.add_conditional_edges("classify", after_classify, {"fixed reply": "decline", "agent": "agent"})
     graph.add_edge("greet", "respond")
     graph.add_edge("confirm_previous", "respond")
+    graph.add_edge("decline", "respond")
     graph.add_conditional_edges("agent", tools_condition, {"tools": "tools", END: "respond"})
     graph.add_edge("tools", "agent")
     graph.add_edge("respond", END)

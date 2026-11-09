@@ -174,6 +174,14 @@ CREATE TABLE IF NOT EXISTS oura_history_cache (
     raw_json    TEXT NOT NULL            -- daily endpoints only (no heartrate)
 );
 
+CREATE TABLE IF NOT EXISTS unclassified_messages (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL,
+    ts          TEXT NOT NULL,
+    text        TEXT NOT NULL,           -- a message no skill fitted (routed to "other"), for the weekly review
+    reason      TEXT
+);
+
 CREATE TABLE IF NOT EXISTS daily_scores (
     user_id          INTEGER NOT NULL,
     day              TEXT NOT NULL,
@@ -1002,6 +1010,19 @@ def get_oura_history(user_id: int) -> dict | None:
         return None
     return {"fetched_at": datetime.fromisoformat(row["fetched_at"]), "start_date": date.fromisoformat(row["start_date"]),
             "end_date": date.fromisoformat(row["end_date"]), "raw": json.loads(row["raw_json"])}
+
+
+def add_unclassified(user_id: int, ts: datetime, text: str, reason: str | None) -> None:
+    with connect() as conn:
+        conn.execute("INSERT INTO unclassified_messages (user_id, ts, text, reason) VALUES (?, ?, ?, ?)",
+                     (user_id, _iso(ts), text, reason))
+
+
+def unclassified_since(user_id: int, since: datetime) -> list[dict]:
+    with connect() as conn:
+        rows = conn.execute("SELECT * FROM unclassified_messages WHERE user_id = ? AND ts >= ? ORDER BY id",
+                            (user_id, _iso(since))).fetchall()
+    return [dict(r) for r in rows]
 
 
 # --- daily scores (core/score.py) -------------------------------------------

@@ -1264,7 +1264,9 @@ def test_live_22_second_checkin_replaces_the_first(coach, user, real_checkin):
 @live
 def test_live_23_morning_hiit_then_evening(coach, user, real_checkin):
     chat = Chat(coach, user)
-    chat.send("did 40 min HIIT at 7", 8, 0)
+    offer = chat.send("did 40 min HIIT at 7", 8, 0)
+    if "Want me to add" in offer:                     # M4 A4: Oura doesn't have it, so it offers to add it
+        chat.send("yes", 8, 1)
     chat.send("want to work out now", 18, 0)
     reply = chat.send("4 2", 18, 1)
     chat.print("scenario 23: HIIT this morning, evening check-in")
@@ -1665,6 +1667,7 @@ def test_live_m4_8_9_10_pushback(coach, user, scenario):
     chat.print(f"scenario {scenario}: pushback")
     verdict = judge_pushback(message, reply)
     assert verdict.noticed and verdict.honest_call and verdict.options and verdict.their_choice, verdict.reason
+    assert verdict.at_most_two_options, f"more than two options: {reply}"
     assert not verdict.guilt and not GUILT.search(reply), verdict.reason
     assert_rules(reply, set())
 

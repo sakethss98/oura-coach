@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core import agent, db, users  # noqa: E402
+from core import agent, classifier, db, users  # noqa: E402
 from core.config import DB_PATH, FIXTURES_DIR  # noqa: E402
 from modules.nutrition import food  # noqa: E402
 from modules.nutrition import meals  # noqa: E402
@@ -102,6 +102,8 @@ class Pushback(BaseModel):
     noticed: bool = Field(description="true if it names what it noticed about their plan or their day")
     honest_call: bool = Field(description="true if it says plainly, and kindly, that the plan works against them")
     options: bool = Field(description="true if it offers one better option or two options")
+    at_most_two_options: bool = Field(description="true if it offers at most two options (one suggestion, or two "
+                                                  "choices); false for three or more")
     their_choice: bool = Field(description="true if it leaves the decision to them, e.g. a short question")
     guilt: bool = Field(description="true if it blames, shames or guilts them (missed, failed, should have, lazy)")
     reason: str = Field(description="one short sentence")
@@ -112,7 +114,8 @@ PUSHBACK_JUDGE = ("You check one reply from a running and nutrition coach. The p
 
 
 def judge_pushback(message: str, reply: str) -> Pushback:
-    """The pushback rubric (docs/scenarios.md M4-8..10): noticed, honest call, options, their choice, no guilt."""
+    """The pushback rubric (docs/scenarios.md M4-8..10): noticed, honest call, options (at most two), their
+    choice, no guilt."""
     from core.llm import structured_call
     return structured_call("judge", Pushback, PUSHBACK_JUDGE, f"They wrote: {message}\nThe reply: {reply}",
                            job="judge")
@@ -245,12 +248,23 @@ class ScriptedChat(BaseChatModel):
     script: list = Field(default_factory=list)
     seen: list = Field(default_factory=list)       # the messages of each call
     tool_names: list = Field(default_factory=list)  # tools offered in the latest bind_tools
+    last_offered: list = Field(default_factory=list)  # the tools the latest agent call was offered
 
     def _generate(self, messages, stop=None, run_manager=None, **kwargs) -> ChatResult:
         self.seen.append(list(messages))
         if not self.script:
             raise AssertionError("the agent called the model more often than scripted")
         message = self.script.pop(0)
+        offered = set(self.tool_names)
+        for tool_call in getattr(message, "tool_calls", None) or []:
+            # Every scenario proves its route: the skill picked for the message must offer the tool used.
+            if tool_call["name"] not in offered:
+                raise AssertionError(f"{tool_call['name']} is not offered for this message (skills gave "
+                                     f"{sorted(offered)}): fix the label in tests/data/classifier_set.jsonl "
+                                     "or the skill's tools")
+        if self.tool_names:
+            self.last_offered = list(self.tool_names)
+        self.tool_names = []                       # a later call (the rewrite) offers no tools unless bound again
         return ChatResult(generations=[ChatGeneration(message=message.model_copy())])
 
     def bind_tools(self, tools, **kwargs):
@@ -262,11 +276,47 @@ class ScriptedChat(BaseChatModel):
         return "scripted"
 
 
+CLASSIFIER_SET = Path(__file__).resolve().parent / "data" / "classifier_set.jsonl"
+
+
+class LabeledClassifier:
+    """The classifier in scripted tests: each message's categories come from tests/data/classifier_set.jsonl,
+    so every scripted scenario runs through its real route. An entry with `context` is used only when that
+    text appears in the recent conversation or pending notes (the same "yes" can mean different things).
+    An unlabeled message fails the test, or with CLASSIFIER_COLLECT=<file> is written there (route: other)."""
+
+    def __init__(self):
+        self.entries = [json.loads(line) for line in CLASSIFIER_SET.read_text().splitlines() if line.strip()]
+        self.calls: list[tuple[str, list[str]]] = []
+        self.unlabeled: list[str] = []      # checked when the test ends (the agent's classify node catches errors)
+
+    def __call__(self, message, recent, notes, user_id=None, skills=None):
+        context = "\n".join([text for _, text in recent] + list(notes))
+        same = [e for e in self.entries if e["text"].strip() == message.strip()]
+        fitting = [e for e in same if e.get("context") and e["context"] in context] or \
+                  [e for e in same if not e.get("context")]
+        if not fitting:
+            self.unlabeled.append(f"{message!r} (context: {context[-200:]!r})")
+            collect = os.getenv("CLASSIFIER_COLLECT")
+            if collect:
+                with open(collect, "a") as f:
+                    f.write(json.dumps({"text": message, "context": context[-300:]}) + "\n")
+            categories = []
+        else:
+            categories = classifier.clean(fitting[0]["categories"], list(skills or {}))
+        self.calls.append((message, categories))
+        return {"categories": categories, "reason": "labeled in tests/data/classifier_set.jsonl"}
+
+
 @pytest.fixture
 def chat_model(monkeypatch):
     model = ScriptedChat()
     monkeypatch.setattr(agent, "make_model", lambda override=None: model)
-    return model
+    model_classifier = LabeledClassifier()
+    monkeypatch.setattr(classifier, "classify", model_classifier)
+    yield model
+    if model_classifier.unlabeled and not os.getenv("CLASSIFIER_COLLECT"):
+        pytest.fail("Label these messages in tests/data/classifier_set.jsonl: " + "; ".join(model_classifier.unlabeled))
 
 
 def tool_results(messages) -> list[dict]:

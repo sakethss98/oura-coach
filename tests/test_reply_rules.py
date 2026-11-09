@@ -70,3 +70,24 @@ def test_guilt_words_are_rewritten():
 def test_enforce_keeps_whole_sentences_and_a_short_closing_question():
     long_middle = "Two hard sessions add fatigue. " + " ".join(["Option"] * 60) + ". Which one?"
     assert enforce(long_middle, set()) == "Two hard sessions add fatigue. Which one?"
+
+
+POPPI_REPLY = ("Fine as a low‑cal fizzy treat — if you’re tracking, log ~40 kcal / ~9 g sugar. "
+               "Want me to add it to today’s food?")
+NUTRITION_TOOLS = {"get_today", "list_food", "food_totals", "suggest_meal", "meal_recipe"}
+
+
+def test_an_offer_to_add_needs_a_tool_that_can_add():
+    assert any("no tool for that is available" in v for v in violations(POPPI_REPLY, set(), NUTRITION_TOOLS))
+    assert violations(POPPI_REPLY, set(), NUTRITION_TOOLS | {"log_food"}) == []           # logging offered: fine
+    assert violations(POPPI_REPLY, set()) == []                                          # offers not checked
+    assert enforce(POPPI_REPLY, set(), NUTRITION_TOOLS) == ("Fine as a low‑cal fizzy treat — if you’re tracking, "
+                                                            "log ~40 kcal / ~9 g sugar.")
+
+
+def test_offers_to_save_or_mark_need_their_tools():
+    assert violations("Want me to save that?", set(), {"get_today"})
+    assert violations("Want me to save that?", set(), {"remember"}) == []
+    assert violations("I can mark it done if you like.", set(), {"log_food"})
+    assert violations("I can mark it done if you like.", set(), {"mark_done"}) == []
+    assert violations("I'll add it once you tell me the time.", set(), {"add_manual_workout"}) == []

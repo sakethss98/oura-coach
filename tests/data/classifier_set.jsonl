@@ -1,0 +1,83 @@
+{"text": "I have a cold, should I run?", "categories": ["pain_injury"], "source": "added"}
+{"text": "my knee hurts after long runs", "categories": ["pain_injury"], "source": "added", "held_out": true}
+{"text": "write me a poem", "categories": ["off_topic"], "source": "added"}
+{"text": "who won the game last night?", "categories": ["off_topic"], "source": "added"}
+{"text": "help me with my taxes", "categories": ["off_topic"], "source": "added", "held_out": true}
+{"text": "want to work out", "categories": ["training"], "source": "scenario", "held_out": true}
+{"text": "want to work out now", "categories": ["training"], "source": "scenario"}
+{"text": "want HIIT", "categories": ["training"], "source": "scenario"}
+{"text": "why?", "categories": ["training"], "source": "scenario"}
+{"text": "2 3 tired", "categories": ["training"], "source": "scenario", "notes": ["A check-in answer (energy 1-5 and soreness 0-5) is awaited."]}
+{"text": "4 2 legs fine", "categories": ["training"], "source": "scenario", "notes": ["A check-in answer (energy 1-5 and soreness 0-5) is awaited."], "held_out": true}
+{"text": "4 1", "categories": ["training"], "source": "scenario", "notes": ["A check-in answer (energy 1-5 and soreness 0-5) is awaited."]}
+{"text": "4 1 fine", "categories": ["training"], "source": "scenario", "notes": ["A check-in answer (energy 1-5 and soreness 0-5) is awaited."]}
+{"text": "4 2", "categories": ["training"], "source": "scenario", "notes": ["A check-in answer (energy 1-5 and soreness 0-5) is awaited."]}
+{"text": "skip", "categories": ["training"], "source": "scenario", "notes": ["A check-in answer (energy 1-5 and soreness 0-5) is awaited."]}
+{"text": "5 0 20 min run then 30 min strength", "categories": ["training"], "source": "scenario", "notes": ["A check-in answer (energy 1-5 and soreness 0-5) is awaited."], "held_out": true}
+{"text": "5 0 give me run + strength", "categories": ["training"], "source": "scenario", "notes": ["A check-in answer (energy 1-5 and soreness 0-5) is awaited."]}
+{"text": "had poha", "categories": ["logging"], "source": "scenario"}
+{"text": "done, felt great", "categories": ["logging"], "source": "scenario"}
+{"text": "went for a 30 min walk at 6", "categories": ["logging"], "source": "scenario"}
+{"text": "hi, had 2 eggs", "categories": ["logging"], "source": "scenario"}
+{"text": "remove the pizza", "categories": ["logging"], "source": "scenario", "held_out": true}
+{"text": "poppi strawberry lemon soda small can", "categories": ["logging"], "source": "scenario"}
+{"text": "I ate 5 slices of pizza at 3pm", "categories": ["logging"], "source": "scenario"}
+{"text": "coffee at 8 and a banana at 10:30", "categories": ["logging"], "source": "scenario"}
+{"text": "2 eggs, toast and coffee for breakfast", "categories": ["logging"], "source": "scenario"}
+{"text": "had a bowl of maggi", "categories": ["logging"], "source": "scenario", "held_out": true}
+{"text": "delete the last two", "categories": ["logging"], "source": "scenario"}
+{"text": "had a cookie", "categories": ["logging"], "source": "scenario"}
+{"text": "done", "categories": ["logging"], "source": "scenario"}
+{"text": "did the strength part at 7:25", "categories": ["logging"], "source": "scenario"}
+{"text": "went for a walk at 6", "categories": ["logging"], "source": "scenario", "held_out": true}
+{"text": "did the strength", "categories": ["logging"], "source": "scenario"}
+{"text": "did 40 min HIIT at 7", "categories": ["logging"], "source": "scenario"}
+{"text": "update from oura", "categories": ["logging"], "source": "scenario"}
+{"text": "I did 49 min HIIT at 10:37", "categories": ["logging"], "source": "scenario"}
+{"text": "I ran at 10:37", "categories": ["logging"], "source": "scenario", "held_out": true}
+{"text": "correction on that it is 3g fiber and 9g carbs. 30cal", "categories": ["logging"], "source": "scenario", "prior_turns": [["them", "poppi strawberry lemon soda small can"], ["coach", "Logged poppi soda: about 450 kcal, 20 g protein."]]}
+{"text": "it was cheese pizza with olives and onions, I don't think it's 60g protein. Edit that", "categories": ["logging"], "source": "scenario", "prior_turns": [["them", "I ate 5 slices of pizza at 3pm"], ["coach", "Logged 5 slices of pizza at 3pm."]]}
+{"text": "the 3pm one", "categories": ["logging"], "source": "scenario", "prior_turns": [["them", "remove the pizza"], ["coach", "You have two pizza entries, at 1pm and 3pm. Which one should I remove?"]]}
+{"text": "both", "categories": ["logging"], "source": "scenario", "prior_turns": [["them", "remove the pizza"], ["coach", "You have two pizza entries, at 1pm and 3pm. Which one should I remove?"]], "context": "pizza entries"}
+{"text": "both", "categories": ["memory"], "source": "scenario", "prior_turns": [["them", "forget my diet stuff"], ["coach", "You have two diet facts: \"Vegetarian, eats eggs\" and \"No mushrooms\". Which one, or both?"]], "context": "diet facts"}
+{"text": "12:10 to 1, about 50 min", "categories": ["logging"], "source": "scenario", "prior_turns": [["them", "done"], ["coach", "Oura doesn't have a matching workout. Oura only shares workouts the ring recorded (Apple Watch sessions don't come through). Want me to add it with a time?"]], "held_out": true}
+{"text": "done, what should I eat now?", "categories": ["logging", "nutrition"], "source": "scenario"}
+{"text": "what's left to eat today", "categories": ["nutrition"], "source": "scenario"}
+{"text": "simple dinner ideas, I have dal, rice and spinach", "categories": ["nutrition"], "source": "scenario", "held_out": true}
+{"text": "dinner ideas", "categories": ["nutrition"], "source": "scenario"}
+{"text": "should I have a Celsius right now?", "categories": ["nutrition"], "source": "scenario"}
+{"text": "what did I eat today?", "categories": ["nutrition"], "source": "scenario"}
+{"text": "How much caffeine is in a 12 oz Celsius?", "categories": ["nutrition"], "source": "scenario"}
+{"text": "Should I skip dinner to hit my deficit?", "categories": ["nutrition"], "source": "scenario", "held_out": true}
+{"text": "I'm going to have pizza later", "categories": ["nutrition"], "source": "scenario"}
+{"text": "give me the second one", "categories": ["nutrition"], "source": "scenario", "prior_turns": [["them", "simple dinner ideas, I have dal, rice and spinach"], ["coach", "For dinner, about 600 kcal:\n1. Dal palak with jeera rice\n2. Spinach moong dal khichdi"]]}
+{"text": "make it higher protein", "categories": ["nutrition"], "source": "scenario", "prior_turns": [["them", "give me the second one"], ["coach", "Spinach moong dal khichdi · about 520 kcal\n1. Rinse the dal and rice."]]}
+{"text": "yes, the smoothie", "categories": ["nutrition"], "source": "scenario", "notes": ["The coach's last message before this conversation: 'Want an estimate for that smoothie?'"]}
+{"text": "remember I eat eggs", "categories": ["memory"], "source": "scenario"}
+{"text": "what do you know about me", "categories": ["memory"], "source": "scenario", "held_out": true}
+{"text": "what do you know about me?", "categories": ["memory"], "source": "scenario"}
+{"text": "forget the eggs thing", "categories": ["memory"], "source": "scenario"}
+{"text": "remember I'm traveling Tue-Thu, keep it light", "categories": ["memory"], "source": "scenario"}
+{"text": "remember I'm away sometime soon", "categories": ["memory"], "source": "scenario"}
+{"text": "forget my diet stuff", "categories": ["memory"], "source": "scenario", "held_out": true}
+{"text": "remember I'm traveling today and tomorrow, keep it light", "categories": ["memory"], "source": "scenario"}
+{"text": "how hard can I go today?", "categories": ["recovery_sleep"], "source": "scenario", "held_out": true}
+{"text": "what did I eat on Monday?", "categories": ["trends_patterns"], "source": "scenario"}
+{"text": "how's my day", "categories": ["trends_patterns"], "source": "scenario"}
+{"text": "How much protein did I have over the last week?", "categories": ["trends_patterns"], "source": "scenario"}
+{"text": "Summarize Oct 6", "categories": ["trends_patterns"], "source": "scenario"}
+{"text": "Which day this week was I lowest on protein?", "categories": ["trends_patterns"], "source": "scenario", "held_out": true}
+{"text": "Which days do I usually skip workouts?", "categories": ["trends_patterns"], "source": "scenario"}
+{"text": "and on Oct 6?", "categories": ["trends_patterns"], "source": "scenario", "prior_turns": [["them", "what did I eat on Monday?"], ["coach", "Rajma chawal, about 600 kcal."]]}
+{"text": "and next Friday?", "categories": ["trends_patterns"], "source": "scenario", "prior_turns": [["them", "and on Oct 6?"], ["coach", "Nothing logged on Oct 6."]]}
+{"text": "How did I sleep this week?", "categories": ["trends_patterns", "recovery_sleep"], "source": "scenario"}
+{"text": "Going for a 2-hour run after 5 hours of sleep", "categories": ["training", "recovery_sleep"], "source": "scenario"}
+{"text": "I'll do HIIT twice today to make up for yesterday", "categories": ["training"], "source": "scenario"}
+{"text": "yes", "categories": ["training"], "source": "scenario", "notes": ["A yes/no answer is awaited to the coach's question: \"I'd suggest a 30-min walk instead. Still want HIIT?\""], "context": "A yes/no answer is awaited"}
+{"text": "yes", "categories": ["training"], "source": "scenario", "notes": ["A yes/no workout question from earlier today expired unanswered."], "context": "expired unanswered", "held_out": true}
+{"text": "yes", "categories": ["logging"], "source": "scenario", "prior_turns": [["them", "I did 49 min HIIT at 10:37"], ["coach", "Oura doesn't have it. Oura only shares workouts the ring recorded (Apple Watch sessions don't come through). Want me to add 49 min of HIIT at 10:37am?"]], "context": "Oura only shares workouts the ring recorded"}
+{"text": "yes", "categories": ["nutrition"], "source": "scenario", "notes": ["The coach's last message before this conversation: 'Logged the smoothie.\\nWant an estimate for that smoothie?'"], "context": "smoothie", "held_out": true}
+{"text": "yes", "categories": ["training"], "source": "scenario"}
+{"text": "Yes", "categories": ["nutrition"], "source": "scenario", "notes": ["The coach's last message before this conversation: 'Want an estimate for that smoothie?'"], "context": "smoothie"}
+{"text": "no", "categories": ["training"], "source": "scenario", "notes": ["A yes/no answer is awaited to the coach's question: \"I'd suggest a 30-min walk instead. Still want HIIT?\""], "context": "A yes/no answer is awaited"}
+{"text": "When did I sleep best this month, and what was different that day?", "categories": ["trends_patterns", "recovery_sleep"], "source": "scenario"}

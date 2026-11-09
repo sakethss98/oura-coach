@@ -123,7 +123,7 @@ M3.2 is done and tagged (`m3.2` = 00ed428; CLAUDE.md Status agrees). Live use af
 | `logging` | an action, not a question: food, workouts done, done |
 | `off_topic` | anything outside the coach |
 
-**C2** `tests/data/classifier_set.jsonl`: every line of `data/my_questions.txt`, the exported messages, and **every scenario message**, as `{text, prior_turns?, categories}`. I propose the labels and flag the doubtful ones for you (e.g. "Had a paneer wrap, what's left and should I still run tonight?" = logging + nutrition, or + training).
+**C2** `tests/data/classifier_set.jsonl` (every scenario message, in the repo) + `data/classifier_personal.jsonl` (every line of `data/my_questions.txt` and the exported messages: gitignored, decided 2026-11-08), as `{text, prior_turns?, categories}`. I propose the labels and flag the doubtful ones for you (e.g. "Had a paneer wrap, what's left and should I still run tonight?" = logging + nutrition, or + training).
 
 **C3 Classifier node.**
 - Graph: `ingest → greet | confirm_previous | classify → decline (off_topic) | agent ⇄ tools → respond`.
@@ -298,6 +298,8 @@ M3.2 is done and tagged (`m3.2` = 00ed428; CLAUDE.md Status agrees). Live use af
 - Low readiness on a program day → the planner's normal downgrade, and the program day is marked `moved`/easy.
 - An active fact with `intensity_cap` → program days in its range are `skipped` (paused), and the plan resumes the same week number afterwards.
 
+**Guilt rule, narrowed (added 2026-11-08, do in Part E):** the code GUILT rule (`core/reply_rules.py`) catches only blame aimed at the person: "you failed", "you should have", "lazy", "slacking". "Missed" and "behind" are allowed when they describe a session or a number ("Moved the long run you missed to Saturday.", "10 g behind on protein"), because adjustment messages need them. Tests: that sentence passes; "You failed to log dinner." and "You should have slept more." still fail.
+
 **Scenarios E (scripted + live):** E-1 feasible date, E-2 infeasible date, E-3 "what's today's run", E-4 missed long run, E-5 two misses in a week, E-6 "am I on track", E-7 direction goal → rules → confirmed fields, E-8 two strength days in build, E-9 no heavy legs before a long run, E-10 "hybrid athlete by December?" (honest no + milestones; muscle-gain honesty rule), E-11 a hybrid day (easy run then upper body) in a build week, E-12 an ad-hoc run + lift on a program day uses that day's run, E-13 "I want to run a half marathon on Feb 15 under 2:30, can I?" → the distance feasibility plus a predicted time vs 2:30, honest either way (scripted with and without a ≥ 5 km run). The scripted race date is Feb 15, 2027.
 
 ## Part F — USDA FoodData Central
@@ -316,6 +318,7 @@ I'll read both fully and expect to pick FelipeAdachi (no new runtime, a license)
 - **G1b:** `scripts/calibrate_judge.py` writes 20 replies to `data/calibration.jsonl` for you to grade, then reports agreement per check. Below 85%, the check is reworded.
 - **G2:** `tests/data/eval_set.jsonl`, 5–10 per category, drawn first from `data/my_questions.txt` (the texts are copied in), then the scenarios.
 - **G3:** `scripts/run_evals.py` reports per category: routing accuracy, rubric pass rate, avg latency, tokens, cost and model. Results go to `docs/evals/YYYY-MM-DD.md` and to a LangSmith dataset + experiment.
+- **G3b Reasoning effort (added 2026-11-08):** a plan call took 21 s (3798+1968 tokens, mostly reasoning). Per job (classifier, agent, structured: plan, food, check-in, meal), run the eval set with `reasoning_effort` minimal / low / default and compare latency, cost and rubric pass rate. Recommend a setting per job in `config/models.yaml`. Defaults stay as they are until you approve.
 - **G4:** `docs/demo.md`, a 5-minute script: the Saturday long-run question with its trace, a new category added live, and the eval table.
 
 **After M4:** CLAUDE.md Status + Decisions, README (classifier, skills, MCP servers, program engine; how to add a category, a template, re-ingest GSSI), `scripts/draw_graph.py` redrawn, `git tag m4`.
