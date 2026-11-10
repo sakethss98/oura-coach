@@ -1807,6 +1807,18 @@ def test_m4_14_no_weight_means_per_kg_one_question_then_grams(coach, user, chat_
     assert "using 62 kg" not in saved + grams                     # they just told us: no "(using 62 kg …)" note
 
 
+def test_m4_14_a_weight_answer_routed_elsewhere_still_saves_it_and_code_does_the_grams(coach, user, chat_model,
+                                                                                      patch_oura, monkeypatch):
+    patch_oura()["personal_info"]["weight"] = None
+    chat = Chat(coach, user, chat_model)
+    chat.send(LONG_RUN_QUESTION, 9, 0, [call("fueling_plan", day_text="Saturday"), say("Fuel up Friday.")])
+    from core import classifier
+    monkeypatch.setattr(classifier, "classify", lambda *a, **k: {"categories": ["memory"], "reason": "misrouted"})
+    saved = chat.send("I'm 62 kg", 9, 2, [call("save_body_weight", weight=62, unit="kg"), say("Saved 62 kg.")])
+    assert memory.body_weight(user) == 62 and chat_model.tool_choices[-2] == "save_body_weight"
+    assert "1–1.2 g/kg an hour → 60–75 g an hour" in saved                     # redone by code, not the model
+
+
 def test_m4_14_minutes_from_an_earlier_plan_are_not_theirs(coach, user, chat_model):
     reply = Chat(coach, user, chat_model).send(LONG_RUN_QUESTION, 9, 0, [
         call("fueling_plan", day_text="Saturday", minutes=37), say("")])
@@ -2013,7 +2025,11 @@ def assert_cited_in_own_words(reply: str, seen: dict):
         assert topics(statements) <= topics(seen["plans"][-1]["text"]), own
     if re.search(r"\[\d\]", own):                    # G rubric: every [n]-cited claim is supported by passage n
         from tests.conftest import judge_citations
-        verdict = judge_citations(own, list({s["n"]: s for s in seen["numbered"]}.values()))
+        by_n = {}                                     # every passage of n the coach was given, not just the last
+        for s in seen["numbered"]:
+            if s["passage"] not in by_n.setdefault(s["n"], {**s, "passages": []})["passages"]:
+                by_n[s["n"]]["passages"].append(s["passage"])
+        verdict = judge_citations(own, [{**s, "passage": "\n…\n".join(s["passages"])} for s in by_n.values()])
         assert verdict.supported, f"unsupported: {verdict.unsupported} ({verdict.reason})"
 
 

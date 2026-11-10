@@ -193,7 +193,7 @@ def without_echo(text: str, instruction_texts: list[str]) -> str:
 
 ABOUT_THE_PLAN = re.compile(r"\b(sent|see (the )?(plan|above)|(plan|amounts|text) above|(read|computed) the plan|plan "
                             r"computed|(tell|let) me (if|know|your)|want (any|me|more)|sound good|same plan|re-?run|"
-                            r"update the plan|follow (it|that|this|the plan)|any (tweaks|changes|questions)|what do you weigh|how much do you weigh|your weight)\b",
+                            r"update the plan|follow (it|that|this|the plan)|plan I (built|made|gave)|already have the plan|any (tweaks|changes|questions)|what do you weigh|how much do you weigh|your weight)\b",
                             re.I)
 ECHO_WORDS = 8          # a sentence sharing 8 words in a row with a tool result is an echo of it, not a reply
 
@@ -236,7 +236,7 @@ _SAYS = r"(?:says|said|notes|noted|shows|showed|show|finds|found|find|highlights
 CREDIT = [
     re.compile(rf"\baccording\s+to\s+{_WHO_NAMED}(?:\s+and\s+{_WHO_NAMED})?\s*,?\s*", re.I),
     re.compile(rf"\baccording\s+to\s+{_WHO}\s*,?\s*", re.I),
-    re.compile(rf"\b(?:{_WHO_NAMED}|{_WHO})\s+{_SAYS}(?:\s+that)?\s+", re.I),
+    re.compile(rf"\b(?:{_WHO_NAMED}|{_WHO})\s+(?:\w+ly\s+)?{_SAYS}(?:\s+that)?\s+", re.I),   # "studies typically show"
     re.compile(r"\s*,?\s*\b(?:per|from|says|according\s+to)\s+(?:the\s+)?(?:GSSI|USDA)(?:['’]s)?(?:\s+(?:review|guidance|"
                r"article|research|data))?\b", re.I),
 ]

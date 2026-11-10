@@ -65,6 +65,7 @@ META_REWRITE = re.compile(r"\b(rewrit\w*|paste the|the reply you|underscore\w*)\
 RECENT_FOR_CLASSIFIER = 6    # the classifier sees the last 6 messages (about 3 exchanges) before this one
 # A check-in answer or a yes/no workout question waiting belongs to this category, whatever the classifier says.
 PENDING_OWNER = "training"
+WEIGHT_OWNER = "fueling_hydration"     # their weight, answering the coach's question: save_body_weight lives there
 log = logging.getLogger(__name__)
 
 
@@ -238,6 +239,8 @@ def classify(state: AgentState, config) -> dict:
     categories = route["categories"]
     if categories and training_notes and PENDING_OWNER not in categories and categories != ["off_topic"]:
         categories = categories + [PENDING_OWNER]
+    if _answers_weight_question(state["messages"]) and WEIGHT_OWNER not in categories:
+        categories = [WEIGHT_OWNER] + [c for c in categories if c != "off_topic"]   # the weight goes to code's math
     if not categories:
         db.add_unclassified(t.user.id, t.now, message, route["reason"])
         categories = [skill_files.OTHER]
@@ -269,12 +272,15 @@ def _forced_tool(state: AgentState, tools: list) -> str | None:
     this conversation and their message gives one."""
     if _this_turn(state["messages"]):
         return None                                          # only the first call of the turn
-    messages = state["messages"]
-    asked = any(isinstance(m, AIMessage) and ASKED_WEIGHT.search(_text(m.content)) for m in messages[:-1])
-    offered = {tool.name for tool in tools}
-    if asked and "save_body_weight" in offered and WEIGHT_ANSWER.match(_text(messages[-1].content)):
+    if _answers_weight_question(state["messages"]) and "save_body_weight" in {tool.name for tool in tools}:
         return "save_body_weight"
     return None
+
+
+def _answers_weight_question(messages: list) -> bool:
+    """Their message gives a weight ("I'm 62 kg") after the coach asked for it in this conversation."""
+    asked = any(isinstance(m, AIMessage) and ASKED_WEIGHT.search(_text(m.content)) for m in messages[:-1])
+    return asked and bool(WEIGHT_ANSWER.match(_text(messages[-1].content)))
 
 
 def agent(state: AgentState, config) -> dict:

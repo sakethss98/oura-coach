@@ -136,6 +136,8 @@ def test_the_coach_never_credits_a_source_in_its_own_words():
     assert without_credit("The light week means go easy — the GSSI review notes sweat losses vary a lot.") == (
         "The light week means go easy — sweat losses vary a lot.")
     assert without_credit("Sodium is lost in sweat, according to the research.") == "Sodium is lost in sweat."
+    assert without_credit("Caffeine helps, and studies typically show it works an hour before.") == (
+        "Caffeine helps, and it works an hour before.")
     assert without_credit("Water is fine. The GSSI caffeine article is a good read.") == "Water is fine."  # named
     assert without_credit("Readiness is 75, so go.\nhttps://example.org/a") == "Readiness is 75, so go.\nhttps://example.org/a"
 
@@ -190,6 +192,7 @@ def test_next_to_a_plan_at_most_two_sentences_without_recap_amounts_offers_or_ta
                     "where you run?") == "Sodium helps you keep fluid [1], so water is fine — is it hot where you run?"
     assert own_line("Water is fine for a 10k.\nDo you sweat a lot?") == "Water is fine for a 10k. Do you sweat a lot?"
     assert own_line("Water is fine — want a drink plan?") == "Water is fine."
+    assert own_line("You already have the plan I built — quick notes: water is fine.") == "Quick notes: water is fine."
 
 
 
