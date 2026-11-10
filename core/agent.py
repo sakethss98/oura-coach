@@ -310,9 +310,6 @@ def _within_rules(draft: str, tools_called: set[str], t, offered: set[str] | Non
         rewrite = ""                     # it talked about the rewrite instead of doing it: trimmed by code instead
     if rewrite and not reply_rules.violations(rewrite, tools_called, offered, sources, facts):
         return rewrite
-    if any(p.startswith(reply_rules.OFF_PLAN) for p in reply_rules.violations(rewrite or draft, tools_called, offered,
-                                                                              sources, facts)):
-        return ""                        # still about something the plan beside it doesn't cover: no own line
     return (reply_rules.enforce(rewrite or draft, tools_called, offered, sources, facts)
             or reply_rules.enforce(draft, tools_called, offered, sources, facts))
 
@@ -387,6 +384,7 @@ def respond(state: AgentState, config) -> dict:
     def guarded(text: str, beside_plan: bool = False) -> str:
         """The echo, amount and own-line guards; run on the draft and again on a rewrite (written anew)."""
         text = reply_rules.without_echo(text, orders)      # never an instruction read back as the reply
+        text = reply_rules.without_credit(text)            # credit only in the code's Source / Amounts lines
         if fueling:
             text = reply_rules.amounts_from(text, tool_texts)
         if beside_plan:     # the code text has the amounts: its own short line, no recap, no offer
@@ -431,12 +429,8 @@ def respond(state: AgentState, config) -> dict:
     reply = "\n\n".join(p for p in parts if p) or NO_REPLY
     code_sources = list({s["url"]: s for m in turn_messages if isinstance(m, ToolMessage) and isinstance(m.artifact, dict)
                          for s in m.artifact.get("code_sources", [])}.values())
-    if sources:     # a [n] stays only on a claim its passages support (else the sentence is the coach's own)
-        reply, checked = citations.check_markers(citations.mark_urls(reply, sources), sources)
-        if checked:
-            db.log_run("citation_check", models.model_name("embeddings"),
-                       [{"n": s["n"], "url": s["url"], "passage": s.get("passage")} for s in sources], checked,
-                       t.user.id, job="embeddings")
+    if sources:     # a [n] stays only on a claim its passages state (else the sentence is the coach's own)
+        reply = citations.check_markers(citations.mark_urls(reply, sources), sources, t.user.id)[0]
     reply = citations.finish(reply, sources, code_sources)   # clean [n] markers + the source lines, by code
     if state.get("expired_checkin"):
         reply += f"\n{EXPIRED_CHECKIN}"

@@ -5,7 +5,8 @@ returns the lines sent to the person as built, plus the numbers. The tool (modul
 gathers the inputs: the run day from their words, minutes from their words, their pace, or their longest
 recent run; body weight from goals.yaml / Oura / a saved fact, never estimated; recent carbs from food_log.
 
-Without a weight every amount stays per kg ("5-7 g per kg") and the person is asked once for it.
+Without a weight every amount stays per kg ("5-7 g per kg") and the person is asked once for it. Grams made from
+a stored weight say so once: "(using 70 kg from your Oura profile; tell me if that's off)".
 """
 from datetime import date, timedelta
 from functools import lru_cache
@@ -27,6 +28,8 @@ LONG_RUN_MIN = 60
 SODIUM_MG_PER_MMOL = 23
 RECENT_DAYS = 7
 ASK_WEIGHT = "Tell me your weight and I'll turn these into grams."
+WEIGHT_NOTE = "(using {kg:.0f} kg {source}; tell me if that's off)"
+FROM_WEIGHT = ("day_before_g", "before_g", "max_loss_kg", "caffeine_mg", "recovery_g_per_hour")   # amounts × kg
 MIN_RECENT_DAYS_LOGGED = 2
 
 
@@ -83,10 +86,11 @@ def recent_carbs(carbs_by_day: dict[str, float | None]) -> dict | None:
 
 def plan(minutes: int, how: str, weight_kg: float | None, parts: list[str] | None, run_day: date | None,
          today: date, carbs_lately: dict | None = None, race: bool = False, ask_weight: bool = False,
-         distance_km: float | None = None) -> dict:
+         distance_km: float | None = None, weight_from: str | None = None) -> dict:
     """{"text": lines sent as built, "amounts": the numbers, "sources": {part: url}, "source_list": [{title, url}]
     (the articles behind the amounts, in order), "carb_load": True/False when the day before is in the plan
-    (False = no extra carbs), "per_kg": bool}."""
+    (False = no extra carbs), "per_kg": bool}. weight_from: where a stored weight came from ("from your Oura
+    profile"), said once under amounts made from it; None = don't say it (they just told us)."""
     r = rules()
     kg = weight_kg
     parts = [p for p in (parts or DEFAULT_PARTS) if p in PARTS]
@@ -196,6 +200,8 @@ def plan(minutes: int, how: str, weight_kg: float | None, parts: list[str] | Non
 
     if kg is None and ask_weight:
         lines.append(ASK_WEIGHT)
+    if kg and weight_from and any(amounts.get(name) for name in FROM_WEIGHT):
+        lines.append(WEIGHT_NOTE.format(kg=kg, source=weight_from))
     titles = {url: r["titles"][key] for key, url in r["sources"].items()}
     source_list = [{"title": titles[url], "url": url} for url in dict.fromkeys(sources.values())]
     carb_load = (amounts["day_before_g"] is not None or bool(pick(r["race_day_before" if race else "day_before"],

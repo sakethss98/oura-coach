@@ -50,14 +50,14 @@ def live(test):
 
 core = pytest.mark.core          # a ★ scenario: must pass every run
 real_mcp = pytest.mark.real_mcp  # starts the real MCP server (tests/test_mcp_tools.py)
-real_embeddings = pytest.mark.real_embeddings  # the citation check with real embeddings (tests/test_citation_check.py)
+real_check = pytest.mark.real_check  # the citation check asks the real model (tests/test_citation_check.py)
 
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "live_llm: a scenario against the real model")
     config.addinivalue_line("markers", "core: a ★ scenario (must pass every live run)")
     config.addinivalue_line("markers", "real_mcp: uses the real MCP server instead of the scripted search results")
-    config.addinivalue_line("markers", "real_embeddings: the citation check calls the embeddings API")
+    config.addinivalue_line("markers", "real_check: the citation check asks the real model")
 
 
 def pytest_generate_tests(metafunc):
@@ -182,16 +182,27 @@ def fake_gssi(request, monkeypatch):
     yield calls
 
 
-def same_vector(texts: list[str]) -> list[list[float]]:
-    """Every text gets the same vector: similarity always passes, so the key-term check alone decides."""
-    return [[1.0, 0.0] for _ in texts]
+CHECK_STOP = frozenset("that with your this from have about more just only also usually which when will should could would "
+                       "they them their there been were what into than then very help helps does each most much".split())
+
+
+def _words(text: str) -> set[str]:
+    return {w[:5] for w in re.findall(r"[a-z]{4,}", text.lower())} - CHECK_STOP
+
+
+def overlap_states(claim: str, passages: list[str], user_id: int | None = None) -> dict:
+    """The scripted citation check: the passages "state" a claim when most of its words (4+ letters, first 5) are
+    in them ("Readiness is 75, so go easy" states nothing)."""
+    words = _words(claim)
+    states = bool(words) and len(words & _words(" ".join(passages))) / len(words) >= 0.6
+    return {"states": states, "reason": "word overlap (scripted)"}
 
 
 @pytest.fixture(autouse=True)
-def fake_embeddings(request, monkeypatch):
-    """The citation check (core/citations.py) makes no embeddings call in scripted tests."""
-    if not (request.node.get_closest_marker("live_llm") or request.node.get_closest_marker("real_embeddings")):
-        monkeypatch.setattr(citations, "embed_texts", same_vector)
+def fake_citation_check(request, monkeypatch):
+    """The citation check (core/citations.py) makes no model call in scripted tests."""
+    if not (request.node.get_closest_marker("live_llm") or request.node.get_closest_marker("real_check")):
+        monkeypatch.setattr(citations, "passage_states", overlap_states)
 
 
 @pytest.fixture

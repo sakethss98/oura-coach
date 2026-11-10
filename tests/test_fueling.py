@@ -60,6 +60,16 @@ def test_without_a_weight_everything_stays_per_kg_and_asks_once():
     assert not fueling.plan(140, "x", None, None, SAT, MON, ask_weight=False)["text"].endswith("grams.")
 
 
+def test_grams_from_a_stored_weight_say_where_it_came_from():
+    noted = fueling.plan(110, "x", 69.9, None, SAT, MON, weight_from="from your Oura profile")
+    assert noted["text"].endswith("\n(using 70 kg from your Oura profile; tell me if that's off)")
+    assert noted["text"].count("using 70 kg") == 1
+    assert "using" not in fueling.plan(110, "x", 69.9, None, SAT, MON)["text"]          # not asked to say it
+    assert "using" not in fueling.plan(140, "x", None, None, SAT, MON, weight_from="x")["text"]    # per kg
+    short = fueling.plan(40, "x", 69.9, ["before"], SAT, MON, weight_from="from your Oura profile")
+    assert "using" not in short["text"]                                  # nothing in it was made from the weight
+
+
 def test_a_run_today_has_no_day_before_line():
     result = fueling.plan(110, "x", 70, None, MON, MON)
     assert "day_before_g" not in result["amounts"] and "over the day" not in result["text"]

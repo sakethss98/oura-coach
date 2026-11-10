@@ -5,6 +5,10 @@ jobs:
     provider: openai
     model: gpt-5-mini
     params: {reasoning_effort: minimal}
+  citation_check:               # "does passage n state this claim?", one call per [n] (core/citations.py)
+    provider: openai
+    model: gpt-5-mini           # the classifier's model, with a little reasoning: minimal kept 69% right markers
+    params: {reasoning_effort: low}   # and 73% of good ones on the 108 labeled claims; low 91% and 81-83% (3 runs)
   agent:                        # the chat agent and its rewrite of a reply that broke the rules
     provider: openai
     model: gpt-5-mini

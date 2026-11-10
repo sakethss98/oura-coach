@@ -2,9 +2,10 @@
 
 search_gssi numbers its results across the turn ([1], [2], ...). The coach writes the marker after a claim that
 GSSI makes in words ("A low dose works well [1]."); its own advice needs no marker. Code checks every marker
-(`check_markers`): the claim before it must be supported by the passages of that result that the coach was
-given (key terms in them and embedding similarity); an unsupported marker is removed and the sentence stays as
-the coach's own words. Amounts are cited by code: a code-built plan (fueling_plan) names the article behind
+(`check_markers`): one yes/no question per marker to the classifier model, "does the passage state this
+claim?", about the passages of that result the coach was given; an unsupported marker is removed and the
+sentence stays as the coach's own words. The coach never names GSSI in its own prose
+(reply_rules.without_credit): the credit is only in the lines code builds. Amounts are cited by code: a code-built plan (fueling_plan) names the article behind
 each of its ranges. `finish` then makes the reply consistent: a pasted source url becomes its marker, a marker no
 result has is dropped, one source line per cited result is appended, then one line with the articles behind
 the code's amounts (no line at all when neither exists):
@@ -18,9 +19,11 @@ escaped, and only a url in docs/gssi_sources.txt becomes a link (`Source: <a hre
 previews off.
 """
 import html
-import math
 import re
+from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
+
+from pydantic import BaseModel, Field
 
 from core.config import ROOT
 
@@ -60,136 +63,63 @@ def mark_urls(text: str, sources: list[dict]) -> str:
     return re.sub(r"([.!?;:])((?: \[\d{1,2}\])+)", r"\2\1", text)
 
 
-# --- is the claim before a marker in the passages the coach was given? --------------------------------------
-# A claim is supported when every part of it that states something (a part with key terms that isn't about
-# their own day) is said by one sentence of a passage of n: most of its key terms are in that sentence and the
-# sentence is close to it in meaning (embeddings). Tuned for precision on 108 judge-labeled claims from the live
-# M4-11..13 runs (tests/test_citation_check.py): of the markers kept, 16 of 17 were ones the judge accepts; about
-# two thirds of the markers the judge accepts are removed too, which only leaves those sentences as the coach's
-# own words (the Amounts line still names the articles behind the numbers).
-SIMILARITY_MIN = 0.68            # cosine similarity (text-embedding-3-small) with the sentence
-TERMS_MIN = 0.55                 # share of the part's key terms found in that same sentence
-WINDOW_SENTENCES = 1             # sentences per window (2 or 3 kept more bad markers)
-# Where a claim splits into parts: "Sodium is lost in sweat, and drinks help" checks both halves (a bare "and"
-# doesn't split: "fluid retention and plasma volume" is one part).
-CLAUSE_SPLIT = re.compile(r"\s*(?:;|:|\s[—–-]\s|—|,\s+(?:so|and|but|which|while|since|because)\s+|\s+so\s+)\s*")
-MIN_PART_TERMS = 2               # a shorter part ("and performance") is checked with the part before it
-# Who says it, not what is said ("GSSI notes that ...", "research shows ..."): left out of the claim.
-ATTRIBUTION = re.compile(r"^(according to (gssi|the review|research),?|(the )?gssi(['’]s)?( review| guidance)?|"
-                         r"research|the review|studies)\s*(says|notes|finds|shows|highlights|recommends|advises|"
-                         r"suggests)?\s*(that\s+)?", re.I)
-# A part about their own day ("Readiness is 75 and your week was light"): the coach's words, never checked.
-ABOUT_THEM = re.compile(r"\b(readiness|your (week|plan|day|training|run)|the week|this week|the plan|you had|"
-                        r"follow)\b", re.I)
-STOP = frozenset("""a an the and or but so of to in on at for with by from as is are was were be been being it its this
-that these those there here than then very just also even only can could may might should would will shall must do
-does did not no nor if when while which who whom what how why your you yours i we our they them their he she his her
-usually typically generally often mostly mainly largely likely rather instead about around approx approximately
-roughly per more less most much many some any each every all both such into over under up down out off again
-help helps helping need needs needed don't doesn't isn't aren't won't gssi review research shows notes says finds
-highlights recommends advises suggests according guidance study studies""".split())
+# --- does the passage state the claim before a marker? -----------------------------------------------------
+# One yes/no question per marker (job citation_check: the classifier's model with low reasoning,
+# prompts/citation_check.md), all markers of a reply at once. Tuned on 108 claims from the live M4-11..13 runs,
+# labeled by the gpt-5 citation judge (3 votes, majority): of the markers kept, 91% are ones the judge accepts,
+# and 81-83% of the markers the judge accepts are kept (3 runs). It adds one round of calls, about 3.5 s.
+CHECK_WORKERS = 8
 
 
-def _stem(word: str) -> str:
-    for suffix in ("ing", "ed", "es", "s", "ly", "e"):
-        if word.endswith(suffix) and len(word) - len(suffix) >= 3:
-            return word[:-len(suffix)]
-    return word
+class Statement(BaseModel):
+    states: bool = Field(description="true if the passages state the claim (or it clearly follows from them)")
+    reason: str = Field(description="one short sentence")
 
 
-def key_terms(text: str) -> list[str]:
-    """The words that carry a claim: no stopwords, stemmed ("Electrolytes matter" -> ["electrolyt", "matter"]);
-    numbers count ("30–60 minutes" -> 30, 60, minut)."""
-    words = re.findall(r"\d+(?:\.\d+)?|[a-z][a-z'’]+", text.lower().replace("‑", "-"))
-    return [_stem(w) for w in words if w not in STOP and not (w.isalpha() and len(w) < 3)]
+def passage_states(claim: str, passages: list[str], user_id: int | None = None) -> dict:
+    """{"states", "reason"}: do the passages state this claim? One call (job citation_check), recorded in `runs`.
+    Tests replace this."""
+    from core.llm import load_prompt, structured_call
+    text = "\n\n".join(f"Passage {i}: {p}" for i, p in enumerate(passages, 1))
+    answer = structured_call("citation_check", Statement, load_prompt("citation_check"),
+                             f"{text}\n\nThe claim: {claim.strip()}", user_id, job="citation_check")
+    return answer.model_dump()
 
 
-def _cosine(a: list[float], b: list[float]) -> float:
-    dot = sum(x * y for x, y in zip(a, b))
-    return dot / ((math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b))) or 1.0)
-
-
-def embed_texts(texts: list[str]) -> list[list[float]]:
-    """texts -> vectors with the `embeddings` job (tests replace this)."""
-    from core import models
-    return models.embeddings().embed_documents(texts)
-
-
-def claim_parts(claim: str) -> list[str]:
-    """The parts of a claim that state something, without who says it and without their own day."""
-    parts = []
-    for part in CLAUSE_SPLIT.split(MARKER.sub("", claim)):
-        part = ATTRIBUTION.sub("", part.strip(" ,.;—–-")).strip()
-        if not part or not key_terms(part):
-            continue
-        if parts and len(key_terms(part)) < MIN_PART_TERMS:
-            parts[-1] = f"{parts[-1]} and {part}"
-        else:
-            parts.append(part)
-    return [p for p in parts if not ABOUT_THEM.search(p)]
-
-
-def windows(passages: list[str]) -> list[str]:
-    """Each passage as windows of WINDOW_SENTENCES sentences, overlapping (a short passage is one window)."""
-    out = []
-    for passage in passages:
-        sentences = [s for s in re.split(r"(?<=[.!?])\s+|\n+", passage) if s.strip()]
-        out += [" ".join(sentences[i:i + WINDOW_SENTENCES])
-                for i in range(max(1, len(sentences) - WINDOW_SENTENCES + 1))]
-    return out
-
-
-def claim_checks(claim: str, passages: list[str], embed=None) -> list[dict]:
-    """One check per part of the claim: {clause, terms, missing, similarity, supported}, from its best sentence
-    (most key terms, then the closest). No part to check, or no passage, = not supported."""
-    parts, spans = claim_parts(claim), windows(passages)
-    if not parts or not spans:
-        return [{"clause": claim.strip(), "terms": 0.0, "missing": [], "similarity": 0.0, "supported": False}]
-    vectors = (embed or embed_texts)(parts + spans)
-    span_terms = [set(key_terms(w)) for w in spans]
-    checks = []
-    for i, part in enumerate(parts):
-        terms = list(dict.fromkeys(key_terms(part)))
-        scored = []
-        for j, known in enumerate(span_terms):
-            missing = [t for t in terms if t not in known]
-            scored.append((1 - len(missing) / len(terms), _cosine(vectors[i], vectors[len(parts) + j]), missing))
-        supported = [x for x in scored if x[0] >= TERMS_MIN and x[1] >= SIMILARITY_MIN]
-        share, similarity, missing = max(supported or scored, key=lambda x: (x[0], x[1]))
-        checks.append({"clause": part, "terms": round(share, 2), "missing": missing,
-                       "similarity": round(similarity, 3), "supported": bool(supported)})
-    return checks
-
-
-def check_markers(text: str, sources: list[dict], embed=None) -> tuple[str, list[dict]]:
+def check_markers(text: str, sources: list[dict], user_id: int | None = None) -> tuple[str, list[dict]]:
     """The text with every unsupported [n] removed (the sentence stays, as the coach's own words), and what was
-    checked [{n, claim, supported, checks}]. The claim of a marker = its sentence up to the marker (from the
-    previous marker in the same sentence). If the check can't run, no marker is kept: nothing unverified is
-    credited to GSSI."""
+    checked [{n, claim, supported, reason}]. The claim of a marker = its sentence up to the marker (from the
+    previous marker in the same sentence). All checks run at once. If a check fails, its marker goes: nothing
+    unverified is credited to GSSI."""
     numbers = by_number(sources)
-    decisions, out = [], []
-    for sentence in re.split(r"((?<=[.!?])\s+|\n)", text):         # the separators are kept, as they are
-        start, kept = 0, []
+    pieces = re.split(r"((?<=[.!?])\s+|\n)", text)               # sentences and their separators, as they are
+    todo = []                                                       # (piece, marker match, n, claim)
+    for i, sentence in enumerate(pieces):
+        start = 0
         for found in MARKER.finditer(sentence):
             n = int(found.group(1))
-            claim = sentence[start:found.start()]
+            if n in numbers:                                        # finish() drops a marker no result has
+                todo.append((i, found, n, sentence[start:found.start()]))
             start = found.end()
-            if n not in numbers:
-                kept.append((found, True))                      # finish() drops a marker no result has
-                continue
-            passages = [s["passage"] for s in sources if s["n"] == n and s.get("passage")]
-            try:
-                checks = claim_checks(claim, passages, embed)
-            except Exception as e:                              # no embeddings: the marker can't be checked
-                checks = [{"clause": claim, "error": type(e).__name__, "supported": False}]
-            supported = all(c["supported"] for c in checks)
-            decisions.append({"n": n, "claim": claim.strip(), "supported": supported, "checks": checks})
-            kept.append((found, supported))
-        for found, keep in reversed(kept):
-            if not keep:
-                sentence = sentence[:found.start()] + sentence[found.end():]
-        out.append(sentence)
-    return "".join(out), decisions
+
+    def check(item):
+        _, _, n, claim = item
+        passages = [s["passage"] for s in sources if s["n"] == n and s.get("passage")]
+        if not passages or not claim.strip():
+            return {"states": False, "reason": "nothing to check against"}
+        try:
+            return passage_states(claim, passages, user_id)
+        except Exception as e:                                      # no answer: the marker can't be checked
+            return {"states": False, "reason": f"check failed ({type(e).__name__})"}
+
+    with ThreadPoolExecutor(max_workers=min(CHECK_WORKERS, len(todo) or 1)) as pool:
+        verdicts = list(pool.map(check, todo))
+    decisions = [{"n": n, "claim": claim.strip(), "supported": v["states"], "reason": v["reason"]}
+                 for (_, _, n, claim), v in zip(todo, verdicts)]
+    for (i, found, _, _), verdict in reversed(list(zip(todo, verdicts))):   # from the end: offsets stay right
+        if not verdict["states"]:
+            pieces[i] = pieces[i][:found.start()] + pieces[i][found.end():]
+    return "".join(pieces), decisions
 
 
 def finish(text: str, sources: list[dict], code_sources: list[dict] = ()) -> str:

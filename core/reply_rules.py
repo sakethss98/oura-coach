@@ -87,15 +87,45 @@ def _words(text: str) -> int:
 AMOUNT = re.compile(r"\d[\d.,]*\s*(?:[–-]\s*\d[\d.,]*\s*)?(?:g|mg|ml|mL|L|kcal)\b(?:\s*/\s*(?:kg|h|hr|hour)\b)*")
 
 
-def without_amounts(text: str) -> str:
-    """The text without its sentences that state an amount: used for the coach's own line next to a code-built
-    plan, which already carries every amount (so a recap can never differ from it)."""
+# Where a sentence splits into clauses: "Sodium helps you keep fluid [1], so water is fine — is it hot?" has three.
+CLAUSE = re.compile(r"(;\s+|\s+[—–]\s+|—|,\s+(?=(?:and|so|but|which|while|since|because)\b))")
+CONJUNCTION = re.compile(r"^(and|so|but|which|while|since|because)\s+(that\s+)?", re.I)
+
+
+def without_clauses(sentence: str, bad) -> str:
+    """The sentence without its clauses for which bad(clause) is true ("Low doses work [1]; follow the plan I
+    sent." -> "Low doses work [1]."); "" when none is left. A question mark stays only with its clause."""
+    end = re.search(r"[.!?]+\s*$", sentence)
+    body, stop = (sentence[:end.start()], end.group(0).strip()) if end else (sentence, "")
+    parts = CLAUSE.split(body)
+    clauses = [(parts[i - 1] if i else "", parts[i]) for i in range(0, len(parts), 2)]
+    kept = [pair for pair in clauses if pair[1].strip() and not bad(pair[1])]
+    if not kept:
+        return ""
+    if kept[-1] is not clauses[-1] and stop.startswith("?"):
+        stop = "."                                   # the question was dropped: what is left is a statement
+    first = kept[0][1].strip()
+    if kept[0] is not clauses[0] or CONJUNCTION.match(first):      # a new start: "and so water is fine" -> "Water…"
+        first = CONJUNCTION.sub("", first)
+        first = first[:1].upper() + first[1:]
+    text = first + "".join(sep + clause for sep, clause in kept[1:])
+    return text.rstrip(" ,;—–") + stop
+
+
+def _keep(text: str, bad) -> str:
+    """The text, line by line and sentence by sentence, without the clauses bad() finds."""
     lines = []
     for line in text.splitlines():
-        kept = [s for s in re.split(r"(?<=[.!?])\s+", line.strip()) if s and not AMOUNT.search(s)]
+        kept = [k for k in (without_clauses(s, bad) for s in re.split(r"(?<=[.!?])\s+", line.strip()) if s) if k]
         if kept:
             lines.append(" ".join(kept))
     return "\n".join(lines)
+
+
+def without_amounts(text: str) -> str:
+    """The text without its clauses that state an amount: used for the coach's own line next to a code-built
+    plan, which already carries every amount (so a recap can never differ from it)."""
+    return _keep(text, AMOUNT.search)
 
 
 # A sentence that restates a part of a code-built plan ("Day-before: carb-rich meals.", "During: nothing.").
@@ -108,16 +138,10 @@ def _amount_key(amount: str) -> str:
 
 
 def amounts_from(text: str, tool_texts: str) -> str:
-    """The text without its sentences that state an amount no tool returned this turn (the model never does
+    """The text without its clauses that state an amount no tool returned this turn (the model never does
     fueling math: "1.2 g/kg is 74 g an hour" from it is dropped; "20–25 g protein" from the plan stays)."""
     known = {_amount_key(m.group(0)) for m in AMOUNT.finditer(tool_texts)}
-    lines = []
-    for line in text.splitlines():
-        kept = [s for s in re.split(r"(?<=[.!?])\s+", line.strip())
-                if s and all(_amount_key(m.group(0)) in known for m in AMOUNT.finditer(s))]
-        if kept:
-            lines.append(" ".join(kept))
-    return "\n".join(lines)
+    return _keep(text, lambda clause: any(_amount_key(m.group(0)) not in known for m in AMOUNT.finditer(clause)))
 
 
 OWN_LINE_SENTENCES = 2
@@ -169,16 +193,23 @@ def without_echo(text: str, instruction_texts: list[str]) -> str:
 
 ABOUT_THE_PLAN = re.compile(r"\b(sent|see (the )?(plan|above)|(plan|amounts|text) above|(read|computed) the plan|plan "
                             r"computed|(tell|let) me (if|know|your)|want (any|me|more)|sound good|same plan|re-?run|"
-                            r"update the plan|what do you weigh)\b", re.I)
+                            r"update the plan|follow (it|that|this|the plan)|any (tweaks|changes|questions)|what do you weigh|how much do you weigh|your weight)\b",
+                            re.I)
 ECHO_WORDS = 8          # a sentence sharing 8 words in a row with a tool result is an echo of it, not a reply
 
 
+# A question that offers more instead of asking about them ("Want ideas?", "Should I add a meal plan?").
+OFFER_QUESTION = re.compile(r"^\s*(want|would you like|should I|shall I|need|do you want)\b", re.I)
+
+
 def own_line(text: str) -> str:
-    """The coach's own line next to a code-built plan: at most two sentences, in order, with no amount, no recap
-    of the plan and no question ("about 30-60 min before (approx.). Low doses work [1]." keeps both)."""
-    sentences = [s for s in re.split(r"(?<=[.!?])\s+|\n+", without_amounts(text).strip())
-                 if s and not RECAP.match(s) and not s.rstrip().endswith("?") and not ABOUT_THE_PLAN.search(s)]
-    return " ".join(sentences[:OWN_LINE_SENTENCES])
+    """The coach's own line next to a code-built plan: at most two sentences, in order, without amounts, a recap
+    of the plan or talk about the plan itself ("follow the plan I sent"), clause by clause. A question to them
+    stays ("Is it hot where you run?")."""
+    sentences = [s for s in re.split(r"(?<=[.!?])\s+|\n+", text.strip()) if s and not RECAP.match(s)]
+    kept = [k for k in (without_clauses(s, lambda c: AMOUNT.search(c) or ABOUT_THE_PLAN.search(c)
+                                         or OFFER_QUESTION.match(c)) for s in sentences) if k]
+    return " ".join(kept[:OWN_LINE_SENTENCES])
 
 
 def _word_list(text: str) -> list[str]:
@@ -195,6 +226,40 @@ def copied(text: str, passages: list[str], n: int = COPY_WORDS) -> str | None:
             if tuple(found[i:i + n]) in runs:
                 return " ".join(found[i:i + n])
     return None
+
+
+# Credit in the coach's own prose ("GSSI shows that", "according to research", "per USDA"). Credit appears only in
+# the lines code builds (Source / Amounts), so these words are removed and the claim stays.
+_WHO = r"(?:the\s+)?(?:GSSI|USDA|research(?:ers)?|studies|the\s+(?:research|review|evidence|science|article|data))"
+_WHO_NAMED = r"(?:the\s+)?(?:GSSI|USDA)(?:['’]s)?(?:\s+(?:review|guidance|article|research|data|paper|summary))?"
+_SAYS = r"(?:says|said|notes|noted|shows|showed|show|finds|found|find|highlights|recommends|advises|suggests|suggest|reports|explains|states|stresses|confirms)"
+CREDIT = [
+    re.compile(rf"\baccording\s+to\s+{_WHO_NAMED}(?:\s+and\s+{_WHO_NAMED})?\s*,?\s*", re.I),
+    re.compile(rf"\baccording\s+to\s+{_WHO}\s*,?\s*", re.I),
+    re.compile(rf"\b(?:{_WHO_NAMED}|{_WHO})\s+{_SAYS}(?:\s+that)?\s+", re.I),
+    re.compile(r"\s*,?\s*\b(?:per|from|says|according\s+to)\s+(?:the\s+)?(?:GSSI|USDA)(?:['’]s)?(?:\s+(?:review|guidance|"
+               r"article|research|data))?\b", re.I),
+]
+NAMED = re.compile(r"\b(GSSI|USDA|Gatorade Sports Science)\b", re.I)
+
+
+def without_credit(text: str) -> str:
+    """The coach's own prose without credit to a source: "GSSI shows that low doses work [1]." -> "Low doses work
+    [1]."; a sentence that still names GSSI or USDA after that is dropped (credit is only in the code's lines)."""
+    lines = []
+    for line in text.splitlines():
+        kept = []
+        for sentence in re.split(r"(?<=[.!?])\s+", line.strip()):
+            before = sentence
+            for pattern in CREDIT:
+                sentence = pattern.sub("", sentence)
+            sentence = re.sub(r"\s+([,.;:!?])", r"\1", re.sub(r"\s{2,}", " ", sentence)).strip()
+            sentence = re.sub(r"[,;:]+([.!?]|$)", r"\1", sentence)        # "lost in sweat, ." -> "lost in sweat."
+            if sentence and not NAMED.search(sentence):
+                kept.append(sentence[0].upper() + sentence[1:] if sentence[:1] != before[:1] else sentence)
+        if kept:
+            lines.append(" ".join(kept))
+    return "\n".join(lines)
 
 
 # The topics of a fueling plan, by the words that name them. Caffeine first: "energy drink" is caffeine, not
@@ -229,6 +294,7 @@ class TurnFacts:
 # message read as an answer to it (scenarios 17-18: breakfast became an edit of the 8am coffee).
 LOG_OFFERS = re.compile(r"\?\s*(\[\d{1,2}\])?\s*$|\b(want me to|would you like|if you('d)? (want|like)|let me know|"
                         r"tell me|should I|shall I|happy to|I can (also|help))\b", re.I)
+NOT_NEEDED = re.compile(r"\b(no|not|isn['’]t|aren['’]t|don['’]t|doesn['’]t|needn['’]t|without|skip\w*|unnecessary)\b", re.I)
 # More or loaded carbs, said next to a plan that says no extra carbs are needed.
 MORE_CARBS = re.compile(r"\b(load(ing)?|boost(ing)?|extra|increase|more|higher|top(ping)? up|up your)\b[^.!?]{0,30}"
                         r"\bcarb(s|ohydrates?)?\b|\bcarb(ohydrate)?[- ]?(load|loading)\b", re.I)
@@ -239,13 +305,12 @@ def _sentence_problems(sentence: str, tools_called: set[str], tools_offered: set
     problems = [f"uses {what}" for pattern, what in BANNED if pattern.search(sentence)]
     if facts and facts.after_log and LOG_OFFERS.search(sentence):
         problems.append("asks or offers something after logging: confirm what was logged and stop")
-    if facts and facts.carb_load is False and MORE_CARBS.search(sentence):
+    if facts and facts.carb_load is False and MORE_CARBS.search(sentence) and not NOT_NEEDED.search(sentence):
         problems.append("tells them to add or load carbs, but the plan says no extra carbs are needed")
-    if facts and facts.plan_topics is not None:
+    if facts and facts.plan_topics is not None and not sentence.rstrip().endswith("?"):     # a question is fine
         extra = sorted(topics(sentence) - facts.plan_topics)
         if extra:
-            problems.append(f"{OFF_PLAN} {' and '.join(extra)}, which the plan doesn't cover: talk only about what's "
-                            "in it")
+            problems.append(f"{OFF_PLAN} {' and '.join(extra)}, which the plan beside it doesn't cover: leave it out")
     copy = copied(sentence, list(passages))
     if copy:
         problems.append(f'copies a passage word for word ("{copy}…"): say it in your own words')

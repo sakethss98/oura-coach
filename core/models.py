@@ -13,7 +13,7 @@ from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from core.config import ROOT
 
 MODELS_PATH = ROOT / "config" / "models.yaml"
-ENV_OVERRIDABLE = {"classifier", "agent", "structured"}
+ENV_OVERRIDABLE = {"classifier", "citation_check", "agent", "structured"}
 # A call that hangs fails instead of blocking a message or a test run (models.yaml params can change these).
 DEFAULT_PARAMS = {"timeout": 90, "max_retries": 2}
 

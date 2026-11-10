@@ -219,16 +219,28 @@ RUN_TYPES = {"running", "easy_run", "long_run"}      # Oura activity / manual wo
 RUNS_LOOK_BACK_DAYS = 28
 
 
-def _body_weight(t) -> float | None:
-    """kg from goals.yaml (an override), else Oura personal_info, else their saved weight. Never estimated."""
+SAVED_WEIGHT = "that you gave me"
+
+
+def _body_weight(t) -> tuple[float | None, str | None]:
+    """(kg, where it came from): goals.yaml (an override), else Oura personal_info, else their saved weight.
+    Never estimated."""
     override = t.user.goals()["nutrition"].get("weight_kg")
     if override:
-        return override
+        return override, "from your goals settings"
     try:
         oura_kg = Health(t.use_fixtures).bundle(t.user, t.day, now=t.now, allow_stale=True)["body"]["weight_kg"]
     except Exception:
         oura_kg = None
-    return oura_kg or memory.body_weight(t.user)
+    if oura_kg:
+        return oura_kg, "from your Oura profile"
+    saved = memory.body_weight(t.user)
+    return (saved, SAVED_WEIGHT) if saved else (None, None)
+
+
+def _weight_note(kg: float, source: str) -> str:
+    """The questions_asked key for "(using 70 kg from your Oura profile; …)": said once per weight and source."""
+    return f"weight_note {kg:.0f} kg {source}"
 
 
 def _recent_runs(t) -> list[dict]:
@@ -273,19 +285,24 @@ def fueling_plan(state: Messages, config: RunnableConfig, day_text: str | None =
 
 
 def _fueling(t, state: list, day_text: str | None = None, minutes: int | None = None,
-             distance_km: float | None = None, parts: list[str] | None = None, race: bool = False) -> tuple[str, dict]:
+             distance_km: float | None = None, parts: list[str] | None = None, race: bool = False,
+             note_weight: bool = True) -> tuple[str, dict]:
     run_day = None
     if day_text:
         dates = resolve_dates(day_text, None, t.day)
         if dates is None:
             return as_json({"could_not_read": day_text, "reason": "the run's day can't be read"}), {}
         run_day = dates[0]
-    weight = _body_weight(t)
+    weight, weight_from = _body_weight(t)
+    # Grams from a stored weight say where it came from, once per weight (not when they just told us).
+    if not note_weight or weight is None or not db.ask_once(t.user.id, _weight_note(weight, weight_from)):
+        weight_from = None
     if minutes and not _they_said(minutes, state):
         minutes = None                      # a number from an earlier plan, not from them: code finds the length
     run_min, how = fueling.run_minutes(minutes, distance_km, _recent_runs(t))
     result = fueling.plan(run_min, how, weight, parts, run_day, t.day, _carbs_lately(t), race,
-                          ask_weight=weight is None and db.ask_once(t.user.id, "body_weight"), distance_km=distance_km)
+                          ask_weight=weight is None and db.ask_once(t.user.id, "body_weight"), distance_km=distance_km,
+                          weight_from=weight_from)
     # Facts only: instructions in a tool result get echoed back as the reply (the skill body says what to do).
     return (as_json({"sent_as_is": True, "run_day": f"{run_day:%a %b %d}" if run_day else None, "minutes": run_min,
                      "weight_known": weight is not None, "carb_load": result["carb_load"],
@@ -317,12 +334,13 @@ def save_body_weight(weight: float, unit: Literal["kg", "lb"], state: Messages,
     if not low <= kg <= high:
         return as_json({"saved": False, "reason": f"{weight:g} {unit} doesn't look like a body weight"}), {}
     fact = memory.save_body_weight(t.user, kg)
+    db.ask_once(t.user.id, _weight_note(kg, SAVED_WEIGHT))         # they just told us: no "(using 62 kg …)" later
     saved = {"saved": True, "id": fact["id"], "fact": fact["text"]}
     earlier = _last_fueling_args(state)
     if earlier is None:
         return as_json(saved), {}
     # The plan they asked for, again, now in grams: code-built and sent as is (never the model's own math).
-    content, artifact = _fueling(t, state, **earlier)
+    content, artifact = _fueling(t, state, **earlier, note_weight=False)
     redone = json.loads(content)
     return (as_json({**saved, "fueling_plan_redone_in_grams": True, "sent_as_is": True,
                      "carb_load": redone.get("carb_load")}), artifact)

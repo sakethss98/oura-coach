@@ -28,6 +28,8 @@ def test_params_reach_the_model(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key-not-real")
     classifier = models.chat("classifier")
     assert (classifier.model_name, classifier.reasoning_effort) == ("gpt-5-mini", "minimal")
+    check = models.chat("citation_check")                   # the classifier's model, with a little reasoning
+    assert (check.model_name, check.reasoning_effort) == ("gpt-5-mini", "low")
 
 
 def test_cost_from_the_price_table():

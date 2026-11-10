@@ -120,6 +120,24 @@ def test_the_own_line_beside_a_plan_talks_only_about_its_topics():
     assert not violations("Have the energy drink an hour before.", {"fueling_plan"}, facts=caffeine_only)
     assert violations("Have it with some carbs an hour before.", {"fueling_plan"}, facts=caffeine_only)
     assert not violations(m4_11, {"fueling_plan"})                          # no plan beside it: not checked
+    # Their readiness and training load name no fueling topic; a question to them is always fine.
+    assert not violations("Readiness is 75 after a heavy week of training.", {"fueling_plan"}, facts=caffeine_only)
+    assert not violations("Do you usually eat before you run?", {"fueling_plan"}, facts=caffeine_only)
+
+
+def test_the_coach_never_credits_a_source_in_its_own_words():
+    from core.reply_rules import without_credit
+    assert without_credit("GSSI shows that taking caffeine before exercise can improve performance [1].") == (
+        "Taking caffeine before exercise can improve performance [1].")
+    assert without_credit("According to GSSI, sodium is the main electrolyte lost in sweat [1].") == (
+        "Sodium is the main electrolyte lost in sweat [1].")
+    assert without_credit("Normal carbs the day before are fine per GSSI. Research shows low doses work.") == (
+        "Normal carbs the day before are fine. Low doses work.")
+    assert without_credit("The light week means go easy — the GSSI review notes sweat losses vary a lot.") == (
+        "The light week means go easy — sweat losses vary a lot.")
+    assert without_credit("Sodium is lost in sweat, according to the research.") == "Sodium is lost in sweat."
+    assert without_credit("Water is fine. The GSSI caffeine article is a good read.") == "Water is fine."  # named
+    assert without_credit("Readiness is 75, so go.\nhttps://example.org/a") == "Readiness is 75, so go.\nhttps://example.org/a"
 
 
 def test_one_line_from_me_is_a_phrase_about_the_reply():
@@ -152,7 +170,7 @@ def test_a_promise_to_recalculate_later_is_never_allowed():
     assert any("claims" in p for p in violations("I’ll recalc the exact gram amounts and send the plan.", set()))
 
 
-def test_next_to_a_plan_at_most_two_sentences_without_recap_amounts_or_questions():
+def test_next_to_a_plan_at_most_two_sentences_without_recap_amounts_offers_or_talk_about_the_plan():
     from core.reply_rules import own_line
     draft = ("Day-before: carb-rich meals. Before: familiar carb meal a few hours out.\n"
              "Readiness 75 and a light week, so you're set [1]. Any tweaks?")
@@ -166,6 +184,12 @@ def test_next_to_a_plan_at_most_two_sentences_without_recap_amounts_or_questions
     assert own_line("Got your 62 kg. Read the plan and tell me if you want any swaps.") == "Got your 62 kg."
     assert own_line("You likely won't need extra. Tell me your weight (kg or lb) and I'll give amounts.") == (
         "You likely won't need extra.")                       # the plan already asks for it, once
+    # Clause by clause: what is left of a sentence stays, and a question to them stays.
+    assert own_line("Low doses work [1]; follow the timing in the plan I sent.") == "Low doses work [1]."
+    assert own_line("Sodium helps you keep fluid [1], and sweat losses run 1–2 L/h, so water is fine — is it hot "
+                    "where you run?") == "Sodium helps you keep fluid [1], so water is fine — is it hot where you run?"
+    assert own_line("Water is fine for a 10k.\nDo you sweat a lot?") == "Water is fine for a 10k. Do you sweat a lot?"
+    assert own_line("Water is fine — want a drink plan?") == "Water is fine."
 
 
 
