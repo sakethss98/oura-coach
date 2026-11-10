@@ -1,5 +1,5 @@
 """The reply rules (core/reply_rules.py): limits, internal terms, first-person claims."""
-from core.reply_rules import MAX_WORDS, enforce, violations
+from core.reply_rules import MAX_WORDS, TurnFacts, enforce, topics, violations
 
 
 def test_a_short_plain_reply_passes():
@@ -101,13 +101,29 @@ SOURCE = {"n": 1, "title": "Caffeine and Exercise Performance: An Update",
                      "feel sharper without upsetting the stomach."}
 
 
-def test_a_reply_after_a_search_must_cite_a_result():
+def test_an_uncited_reply_after_a_search_is_fine_it_is_the_coachs_own_answer():
     without = "Have it 30-60 min before the run; a smaller dose is easier on sleep."
-    assert any("cites no source" in p for p in violations(without, {"search_gssi"}, sources=[SOURCE]))
+    assert not violations(without, {"search_gssi"}, sources=[SOURCE])
     assert not violations(without.rstrip(".") + " [1].", {"search_gssi"}, sources=[SOURCE])
-    assert not violations(without + " " + SOURCE["url"], {"search_gssi"}, sources=[SOURCE])   # code makes it [1]
-    assert any("cites no source" in p for p in violations(without + " [4]", {"search_gssi"}, sources=[SOURCE]))
-    assert not violations(without, set(), sources=[])                     # nothing found, nothing to cite
+
+
+def test_the_own_line_beside_a_plan_talks_only_about_its_topics():
+    plan = ("Run Sat · about 37 min\nDrink: to thirst; water is fine; sodium matters on long or very sweaty runs.\n"
+            "After: 20–25 g protein, with carbs.")
+    facts = TurnFacts(plan_topics=topics(plan))
+    assert facts.plan_topics == {"drinking", "sodium", "protein", "carbs"}
+    m4_11 = "Readiness is 75 and your week was light, so stick to its fluid and caffeine timing."
+    assert any(p.startswith("talks about caffeine") for p in violations(m4_11, {"fueling_plan"}, facts=facts))
+    assert not violations("Readiness is 75 and the week was light, so drink to thirst.", {"fueling_plan"}, facts=facts)
+    caffeine_only = TurnFacts(plan_topics=topics("Caffeine, if you use it: start low. Take it about 60 min before."))
+    assert caffeine_only.plan_topics == {"caffeine"}
+    assert not violations("Have the energy drink an hour before.", {"fueling_plan"}, facts=caffeine_only)
+    assert violations("Have it with some carbs an hour before.", {"fueling_plan"}, facts=caffeine_only)
+    assert not violations(m4_11, {"fueling_plan"})                          # no plan beside it: not checked
+
+
+def test_one_line_from_me_is_a_phrase_about_the_reply():
+    assert any("one line from me" in p for p in violations("Got it — 62 kg. One line from me: follow the plan.", set()))
 
 
 def test_twelve_words_in_a_row_from_a_passage_is_a_copy_eleven_is_not():

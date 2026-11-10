@@ -1,9 +1,10 @@
 # Fueling and hydration amounts around a run, used by modules/nutrition/fueling.py (code does every number).
 # Each range names the GSSI Sports Science Exchange article it comes from (docs/gssi_sources.txt); the comments
-# say in our own words where in the article the numbers are (no article text in the repo). Nothing here is from
-# outside those articles. Ranges are picked by the run's minutes: min_minutes <= minutes < max_minutes.
+# say in our own words where in the article the numbers are (no article text in the repo). Every number is from
+# those articles; two rules about when a range applies are ours, not GSSI's, and each says so in an `ours:` field.
+# Ranges are picked by the run's minutes: min_minutes <= minutes < max_minutes.
 # Amounts per kg of body weight are turned into grams only with a known weight (never estimated).
-status: checked against the indexed articles 2026-11-09
+status: checked against the indexed articles 2026-11-09; our two rules labeled 2026-11-10
 
 sources:
   carbohydrate: https://www.gssiweb.org/en/sports-science-exchange/article/dietary-carbohydrate-and-the-endurance-athlete-contemporary-perspectives
@@ -46,14 +47,15 @@ before:
 # SSE 106: all-out efforts under 45 min may not gain from carbs, and runs under an hour are little studied.
 # Carbohydrate article: 30-60 g/h is the recommended range for exercise of 1 to 2.5 h.
 # SSE 108: from 2.5 h on, 90 g/h of mixed glucose and fructose (about 2:1) is the advice; the carbohydrate article
-# puts the step past 2.5-3 h. Here the higher tier needs both: 2.5 h or more AND longer than a half marathon
-# (distance known), so a half marathon is always 30-60 g/h however long it takes.
+# puts the step past 2.5-3 h. OUR RULE (not GSSI's): the higher tier also needs a known distance longer than a half
+# marathon, so a half marathon is always 30-60 g/h however long it takes.
 # The last range that matches wins (the higher tier is more specific than the 30-60 one).
 during:
   - {max_minutes: 45, g_per_hour: null, note: "nothing needed", source: during_short}
   - {min_minutes: 45, max_minutes: 60, g_per_hour: null, note: "nothing needed for most runs under an hour", source: during_short}
   - {min_minutes: 60, g_per_hour: [30, 60], source: carbohydrate}
-  - {min_minutes: 150, longer_than_km: 21.1, g_per_hour: [60, 90], note: "a glucose and fructose mix, if your stomach is used to it", source: during_long}
+  - {min_minutes: 150, longer_than_km: 21.1, g_per_hour: [60, 90], note: "a glucose and fructose mix, if your stomach is used to it", source: during_long,
+     ours: "the longer_than_km condition is our rule: GSSI gives the tier by duration only"}
 
 # Drinking during (practical applications): thirst is enough for sessions under 60-90 min, cool weather and easy
 # efforts; plan the drinking past 90 min, above all in heat, keeping the body-mass loss under 2% and never
@@ -63,10 +65,12 @@ fluids:
   - {min_minutes: 90, plan: planned, max_loss_pct: 2, source: drinking}
 # Sodium in drinks, mmol per liter (23 mg per mmol, converted in code). The beverage article: from about 20-30
 # mmol/L the body holds on to more of the fluid, 18-40 mmol/L makes a drink nicer to drink, and from 50 mmol/L
-# people drink less of it. Given with planned drinking (90+ min), when sweat losses are being replaced.
+# people drink less of it. OUR RULE (not GSSI's): sodium is given from 90 min, with planned drinking, when sweat
+# losses are being replaced; the article gives the concentrations, not a duration.
 sodium:
   - {max_minutes: 90, mmol_per_liter: null, note: "water is fine; sodium matters on long or very sweaty runs", source: sodium}
-  - {min_minutes: 90, mmol_per_liter: [20, 40], source: sodium}
+  - {min_minutes: 90, mmol_per_liter: [20, 40], source: sodium,
+     ours: "starting sodium at 90 min is our rule: GSSI gives the concentrations, not when to start"}
 
 # Caffeine, if they use it (caffeine article, practical applications): start low, about 100-200 mg (1.5-3 mg/kg);
 # bigger doses add nothing. Low doses help taken before or late in a long session; test it in training first.

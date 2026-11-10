@@ -14,6 +14,7 @@ agent sees this conversation and nothing older; saved memory and today's data co
 system message every turn. The LLM decides what to do; numbers, rules and plan messages are code.
 Who and when (user_id, now, session_id, use_fixtures) come from the run config, never from the state.
 """
+import dataclasses
 import json
 import logging
 import re
@@ -309,6 +310,9 @@ def _within_rules(draft: str, tools_called: set[str], t, offered: set[str] | Non
         rewrite = ""                     # it talked about the rewrite instead of doing it: trimmed by code instead
     if rewrite and not reply_rules.violations(rewrite, tools_called, offered, sources, facts):
         return rewrite
+    if any(p.startswith(reply_rules.OFF_PLAN) for p in reply_rules.violations(rewrite or draft, tools_called, offered,
+                                                                              sources, facts)):
+        return ""                        # still about something the plan beside it doesn't cover: no own line
     return (reply_rules.enforce(rewrite or draft, tools_called, offered, sources, facts)
             or reply_rules.enforce(draft, tools_called, offered, sources, facts))
 
@@ -338,6 +342,15 @@ def _turn_facts(turn_messages: list, messages: list) -> reply_rules.TurnFacts:
     carb_load = next((r["carb_load"] for name in ("fueling_plan", "save_body_weight") for r in results.get(name, [])
                       if isinstance(r, dict) and r.get("carb_load") is not None), None)
     return reply_rules.TurnFacts(after_log=logged, carb_load=carb_load)
+
+
+def _refused(message: ToolMessage) -> bool:
+    """A write tool that refused and changed nothing ({"added": false}, {"saved": false}, {"updated": false})."""
+    try:
+        result = json.loads(message.content)
+    except (TypeError, ValueError):
+        return False
+    return isinstance(result, dict) and any(result.get(k) is False for k in ("added", "saved", "updated", "removed"))
 
 
 def _tool_texts(turn_messages: list) -> str:
@@ -392,9 +405,9 @@ def respond(state: AgentState, config) -> dict:
         parts += list(dict.fromkeys(verbatim))  # code-built text first, exactly as built (a repeat call once)
         built_by = {m.name for m in turn_messages if isinstance(m, ToolMessage) and isinstance(m.artifact, dict)
                     and m.artifact.get("verbatim")}
-        # A tool that wrote nothing this time (mark_done with nothing to mark) is not a write.
-        no_write = {m.name for m in turn_messages if isinstance(m, ToolMessage) and isinstance(m.artifact, dict)
-                    and m.artifact.get("wrote") is False}
+        # A tool that wrote nothing this time (mark_done with nothing to mark, a refused add) is not a write.
+        no_write = {m.name for m in turn_messages if isinstance(m, ToolMessage)
+                    and ((isinstance(m.artifact, dict) and m.artifact.get("wrote") is False) or _refused(m))}
         writes = (tools_called & WRITE_TOOLS) - no_write
         their_message = next(m for m in reversed(state["messages"]) if isinstance(m, HumanMessage))
         asked = "?" in _text(their_message.content)             # they also asked something: keep the answer
@@ -406,6 +419,10 @@ def respond(state: AgentState, config) -> dict:
         repeats = any(draft and draft in v for v in verbatim)
         explains = bool(tools_called & KNOWLEDGE_TOOLS)     # its own words on the science, with the link
         beside_plan = bool(built_by & AMOUNT_TOOLS)
+        if beside_plan:     # its own line talks only about what the plan covers
+            plan_text = "\n".join(m.artifact["verbatim"] for m in turn_messages if isinstance(m, ToolMessage)
+                                  and m.name in AMOUNT_TOOLS and isinstance(m.artifact, dict) and m.artifact.get("verbatim"))
+            facts = dataclasses.replace(facts, plan_topics=reply_rules.topics(plan_text))
         draft = guarded(draft, beside_plan)
         if draft and not repeats and (explains or (asked and not answered) or (writes and not covered)):
             parts.append(guarded(_within_rules(draft, tools_called, t, offered, sources, facts), beside_plan))
@@ -414,6 +431,12 @@ def respond(state: AgentState, config) -> dict:
     reply = "\n\n".join(p for p in parts if p) or NO_REPLY
     code_sources = list({s["url"]: s for m in turn_messages if isinstance(m, ToolMessage) and isinstance(m.artifact, dict)
                          for s in m.artifact.get("code_sources", [])}.values())
+    if sources:     # a [n] stays only on a claim its passages support (else the sentence is the coach's own)
+        reply, checked = citations.check_markers(citations.mark_urls(reply, sources), sources)
+        if checked:
+            db.log_run("citation_check", models.model_name("embeddings"),
+                       [{"n": s["n"], "url": s["url"], "passage": s.get("passage")} for s in sources], checked,
+                       t.user.id, job="embeddings")
     reply = citations.finish(reply, sources, code_sources)   # clean [n] markers + the source lines, by code
     if state.get("expired_checkin"):
         reply += f"\n{EXPIRED_CHECKIN}"

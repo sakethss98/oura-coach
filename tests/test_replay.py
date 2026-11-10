@@ -23,7 +23,7 @@ from connectors.health import Health
 from core import db, memory, score
 from core.agent import CONFIRM_PREVIOUS, EXPIRED_CHECKIN
 from core.coach import VOICE, Coach
-from core.reply_rules import GUILT, copied, violations
+from core.reply_rules import GUILT, copied, topics, violations
 from core.llm import structured_call
 from modules.nutrition import food, meals
 from modules.nutrition.targets import dish_key
@@ -636,6 +636,20 @@ def test_10b_done_without_an_oura_workout_asks_and_invents_nothing(coach, user, 
     [planned] = plans_today(user)
     assert planned["completed"] == 1 and planned["done_by"] == "chat"              # the time they gave
     assert planned["actual_start"] == "2026-10-07T12:10:00-05:00"
+
+
+def test_10b_the_model_cannot_add_the_workout_in_the_turn_the_offer_was_made(coach, user, chat_model, fake_llm,
+                                                                            patch_oura):
+    patch_oura()                                     # live 2026-11-10: "done" -> offer -> add 12:30-1:10pm by itself
+    chat = plan_at_noon(coach, user, chat_model, fake_llm)
+    reply = chat.send("done", 13, 10, [
+        call("mark_done", feeling=None),
+        call("add_manual_workout", workout_type="HIIT", minutes=40, start_time_text="12:30", feeling=None),
+        say("Marked your 40-min HIIT done (12:30–1:10pm).")])
+    assert last_tool_result(chat_model, "add_manual_workout")["added"] is False
+    [planned] = plans_today(user)
+    assert planned["completed"] is None and planned["blocks_done"] == {}                 # no invented times
+    assert reply.startswith(NO_OURA_MATCH) and "12:30" not in reply, reply
 
 
 def test_10b_a_manual_strength_completes_only_the_strength_block(coach, user, chat_model, fake_llm):
@@ -1705,19 +1719,32 @@ def eat_carbs(day_offset: int, carbs: float):
 def test_m4_11_long_run_fueling_is_the_codes_amounts_with_a_line_and_a_link(coach, user, chat_model, fake_gssi):
     for back, carbs in ((1, 200), (2, 160), (3, 180)):
         eat_carbs(-back, carbs)
-    line = "Readiness is 75 and the week was easy, so fuel up Friday and enjoy it [1]."
+    line = ("Readiness is 75 and the week was easy. Eating enough carbohydrate the day before a long run helps you "
+            "feel stronger late in the run [1].")                       # what passage 1 says, in other words
     reply = Chat(coach, user, chat_model).send(LONG_RUN_QUESTION, 9, 0, [
         call("get_today", include_health=True), call("workouts", days_back=7),
         call("search_gssi", query="carbohydrate the day before a long run", k=4),
         call("fueling_plan", day_text="Saturday"), say(line)])
     plan, own = reply.split("\n\n")
-    own, source, *amounts = own.split("\n")
+    own, source, amounts = own.split("\n")
     assert plan.splitlines()[:2] == [
         "🏃 Run Sat Oct 10 · about 37 min (your longest run in the last 4 weeks; tell me if it's longer)",
         "Fri: no extra carbs needed, just your usual meals with carbs; lately about 180 g a day (3 days logged)."]
     assert own == line and source == f"Source [1]: GSSI – Carbohydrate (test) <{GSSI_URLS['carbs']}>"
-    assert amounts and all(line.startswith("Amounts: GSSI – ") for line in amounts)   # the articles behind amounts
+    assert amounts.startswith("Amounts: GSSI – ") and amounts.count(" · ") == 2      # one line, the other 3 articles
     assert fake_gssi == [("gssi", "search_gssi", {"query": "carbohydrate the day before a long run", "k": 4})]
+
+
+def test_m4_11_a_marker_the_passage_does_not_support_is_removed_and_the_sentence_stays(coach, user, chat_model):
+    line = "Readiness is 75 and the week was easy, so fuel up Friday and enjoy it [1]."    # about their day, not GSSI
+    reply = Chat(coach, user, chat_model).send(LONG_RUN_QUESTION, 9, 0, [
+        call("search_gssi", query="carbohydrate the day before a long run", k=4),
+        call("fueling_plan", day_text="Saturday"), say(line)])
+    own = reply.split("\n\n")[1].splitlines()
+    assert own[0] == "Readiness is 75 and the week was easy, so fuel up Friday and enjoy it."
+    assert "Source" not in reply and own[1].startswith("Amounts: GSSI – Dietary Carbohydrate")   # amounts still cited
+    [check] = [r for r in db.recent_runs(20) if r["kind"] == "citation_check"]
+    assert json.loads(check["output_json"])[0]["supported"] is False
 
 
 def test_m4_11_a_copied_line_is_dropped_and_the_link_is_still_there(coach, user, chat_model):
@@ -1733,10 +1760,10 @@ def test_m4_11_a_copied_line_is_dropped_and_the_link_is_still_there(coach, user,
 def test_m4_12_coffee_before_a_run_is_timed_and_sized_for_their_weight(coach, user, chat_model):
     reply = Chat(coach, user, chat_model).send(COFFEE_QUESTION, 7, 0, [
         call("search_gssi", query="caffeine timing before exercise", k=3), call("fueling_plan", parts=["caffeine"]),
-        say(f"A coffee about an hour out gives it time to kick in by the start. {GSSI_URLS['caffeine']}")])  # pasted url
+        say(f"A modest dose about an hour before helps many people. {GSSI_URLS['caffeine']}")])        # pasted url
     assert reply.startswith("Caffeine, if you use it: start low, 1.5–3 mg/kg → 100–210 mg; more doesn't help. Take "
                             "it about 60 min before the run")                                    # 69.9 kg
-    assert "by the start [3].\nSource [3]: GSSI – Caffeine (test) <" + GSSI_URLS["caffeine"] + ">" in reply
+    assert "helps many people [3].\nSource [3]: GSSI – Caffeine (test) <" + GSSI_URLS["caffeine"] + ">" in reply
     assert reply.endswith("Amounts: GSSI – How Sleep Loss Undermines Nutritional Goals <https://www.gssiweb.org/en/"
                           "sports-science-exchange/article/fueling-performance-starts-with-sleep--how-sleep-loss-"
                           "undermines-nutritional-goals>")                                  # the timing's article
@@ -1747,7 +1774,7 @@ def test_m4_13_a_10k_drinks_to_thirst_and_says_there_is_no_weather_data(coach, u
     reply = Chat(coach, user, chat_model).send(ELECTROLYTES_QUESTION, 7, 0, [
         call("search_gssi", query="electrolytes sodium shorter runs", k=3),
         call("fueling_plan", distance_km=10, parts=["fluids"]),
-        say("For about an hour, water is plenty; save electrolytes for long or very sweaty runs [2].")])
+        say("Drinking to thirst works well on shorter runs in mild weather [2], so for a 10k water is plenty.")])
     assert reply.startswith("🏃 Run of 10 km · about 70 min (10 km at about 7 min per km; no usable run pace from Oura)\n"
                             "Drink: to thirst; water is fine")
     assert "no weather data" in reply and f"Source [2]: GSSI – Drinking (test) <{GSSI_URLS['drinking']}>" in reply
@@ -1796,8 +1823,28 @@ def test_m4_11_a_rewrite_next_to_the_plan_gets_the_same_guards(coach, user, chat
         say("Use the fueling_plan text [1]."),                                   # snake_case: rewrite
         say("Friday (day before): spread your carbs [1].\nKeep fat low at dinner [2].\nLight week, so go [1]. "
             "Sound good?")])
-    own = reply.split("\n\n")[1].split("\nSource")[0]
-    assert own == "Keep fat low at dinner [2]. Light week, so go [1]."            # no recap, no question, 2 at most
+    own = reply.split("\n\n")[1].splitlines()[0]
+    assert own == "Keep fat low at dinner. Light week, so go."     # no recap, no question, 2 at most, no unsupported [n]
+    assert "Source" not in reply
+
+
+def test_m4_11_an_own_line_about_a_topic_the_plan_lacks_is_rewritten_once_then_dropped(coach, user, chat_model):
+    drift = "Readiness is 75 and your week was light, so stick to its fluid and caffeine timing."   # no caffeine line
+    script = [call("search_gssi", query="carbs before a long run", k=2), call("fueling_plan", day_text="Saturday")]
+    fixed = Chat(coach, user, chat_model).send(LONG_RUN_QUESTION, 9, 0, script + [
+        say(drift), say("Readiness is 75 and your week was light, so drink to thirst.")])
+    assert fixed.split("\n\n")[1].startswith("Readiness is 75 and your week was light, so drink to thirst.")
+    dropped = Chat(coach, user, chat_model).send(LONG_RUN_QUESTION, 9, 30, script + [say(drift), say(drift)])
+    assert "caffeine" not in dropped.lower() and "Readiness is 75" not in dropped           # no own line at all
+    assert dropped.startswith("🏃 Run Sat Oct 10") and "\nAmounts: GSSI – " in dropped
+
+
+def test_m4_14_one_line_from_me_is_rewritten(coach, user, chat_model):
+    reply = Chat(coach, user, chat_model).send(LONG_RUN_QUESTION, 9, 0, [
+        call("search_gssi", query="carbs before a long run", k=2), call("fueling_plan", day_text="Saturday"),
+        say("One line from me: the week was light, so go."),
+        say("The week was light, so go.")])
+    assert "One line from me" not in reply and "\n\nThe week was light, so go." in reply
 
 
 def test_echo_guard_keeps_a_food_confirmation_after_log_food(coach, user, chat_model):
@@ -1928,11 +1975,17 @@ def assert_cited_in_own_words(reply: str, seen: dict):
     assert not re.search(r"\b(don't|do not) (repeat|add|offer|ask)\b|sent_as_is|as built", reply, re.I), reply
     urls = [s["url"] for s in seen["sources"]]
     assert urls, "search_gssi returned nothing"
-    assert any(f"GSSI – {s['title']} <{s['url']}>" in reply for s in seen["sources"]), "no source line"
+    assert "\nAmounts: GSSI – " in reply, "no line for the articles behind the amounts"     # one line, by code
+    for n in set(re.findall(r"\[(\d)\]", reply)):                       # a marker kept has its source line
+        assert re.search(rf"^Source( \[{n}\])?: GSSI – ", reply, re.M), f"[{n}] without its source line"
     own = reply
     for plan in seen["plans"]:
         own = own.replace(plan["text"], "")
+    own = "\n".join(line for line in own.splitlines() if not line.startswith(("Source", "Amounts")))
     assert copied(own, [s["passage"] for s in seen["sources"]]) is None
+    assert not re.search(r"one line from me", own, re.I)
+    if seen["plans"]:                                  # its own line talks only about what the plan covers
+        assert topics(own) <= topics(seen["plans"][-1]["text"]), own
     if re.search(r"\[\d\]", own):                    # G rubric: every [n]-cited claim is supported by passage n
         from tests.conftest import judge_citations
         verdict = judge_citations(own, list({s["n"]: s for s in seen["numbered"]}.values()))

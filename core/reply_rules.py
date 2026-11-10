@@ -6,9 +6,11 @@
 - Never offer what no tool can do ("want me to look it up?", "I can search online"): answer instead.
 - An offer to add, log, save or mark something ("Want me to add it to today's food?") is allowed only when a
   tool that can do it is offered this turn.
-- When a knowledge search ran (search_gssi), the reply cites a result with its number ([1]) and never copies a
-  passage: 12 or more words in a row the same as a returned passage is a copy (core/citations.py adds the
-  source lines).
+- When a knowledge search ran (search_gssi), the reply never copies a passage: 12 or more words in a row the
+  same as a returned passage is a copy. A [n] marker is only for what GSSI says (code checks each one and removes
+  an unsupported marker, core/citations.py); a sentence without one is the coach's own answer.
+- Next to a code-built fueling plan, the coach's own line talks only about topics the plan has (no "caffeine
+  timing" next to a plan without caffeine); one rewrite, else the line is dropped.
 - Never claim an action no tool performed this turn. Only first-person claims count
   ("I logged", "I've updated", "I'll resend"), never the bare word ("logged 2 eggs" is fine
   after log_food ran, and "you logged" is not a claim at all).
@@ -17,7 +19,6 @@ import json
 import re
 from dataclasses import dataclass
 
-from core import citations
 
 MAX_LINES = 3
 MAX_WORDS = 60
@@ -36,6 +37,8 @@ BANNED = [
     (re.compile(r"\banything else\b", re.I), "an extra offer ('anything else')"),
     (re.compile(r"\boverrides?\b", re.I), "the word 'override'"),
     (GUILT, "a guilt word (missed, failed, should have, behind)"),
+    (re.compile(r"\b(one|a|my)\s+(short\s+|quick\s+)?(line|sentence|note)\s+from\s+me\b|\bmy\s+own\s+line\b", re.I),
+     "a phrase about the reply itself ('one line from me')"),
 ]
 
 # Offers of an action the coach has no tool for (searching, browsing, looking things up). Never allowed:
@@ -194,9 +197,24 @@ def copied(text: str, passages: list[str], n: int = COPY_WORDS) -> str | None:
     return None
 
 
-def cites(text: str, sources: list[dict]) -> bool:
-    """The text cites a result: its number in brackets ([1]), or its url (code turns that into the number)."""
-    return citations.has_marker(text, sources) or any(s["url"] in text for s in sources)
+# The topics of a fueling plan, by the words that name them. Caffeine first: "energy drink" is caffeine, not
+# drinking.
+CAFFEINE_WORDS = re.compile(r"\bcaffein\w*|\bcoffees?\b|\bespressos?\b|\benergy\s+drinks?\b", re.I)
+PLAN_TOPICS = {
+    "caffeine": CAFFEINE_WORDS,
+    "sodium": re.compile(r"\bsodium\b|\belectrolytes?\b|\bsalt(s|y)?\b", re.I),
+    "drinking": re.compile(r"\bfluids?\b|\bhydrat\w*|\bwater\b|\bthirst\w*|\bsweat\w*|\bdrink\w*", re.I),
+    "carbs": re.compile(r"\bcarb\w*|\bglycogen\b|\bgels?\b", re.I),
+    "protein": re.compile(r"\bprotein\b", re.I),
+}
+OFF_PLAN = "talks about"          # the start of that problem's text (_within_rules drops the line on it)
+
+
+def topics(text: str) -> frozenset[str]:
+    """The fueling topics a text talks about ("stick to its fluid and caffeine timing" -> drinking, caffeine)."""
+    found = {"caffeine"} if CAFFEINE_WORDS.search(text) else set()
+    rest = CAFFEINE_WORDS.sub(" ", text)
+    return frozenset(found | {name for name, words in PLAN_TOPICS.items() if name != "caffeine" and words.search(rest)})
 
 
 @dataclass(frozen=True)
@@ -204,6 +222,7 @@ class TurnFacts:
     """What this turn's tools settled, which the reply must not undo."""
     after_log: bool = False          # something was logged and they asked nothing: confirm and stop
     carb_load: bool | None = None    # fueling_plan's day before: False = no extra carbs (None = not in the plan)
+    plan_topics: frozenset[str] | None = None    # the topics of the code-built plan beside the reply (None = no plan)
 
 
 # After a log the reply confirms and stops: a question or an offer ("want me to correct it?") makes their next
@@ -222,6 +241,11 @@ def _sentence_problems(sentence: str, tools_called: set[str], tools_offered: set
         problems.append("asks or offers something after logging: confirm what was logged and stop")
     if facts and facts.carb_load is False and MORE_CARBS.search(sentence):
         problems.append("tells them to add or load carbs, but the plan says no extra carbs are needed")
+    if facts and facts.plan_topics is not None:
+        extra = sorted(topics(sentence) - facts.plan_topics)
+        if extra:
+            problems.append(f"{OFF_PLAN} {' and '.join(extra)}, which the plan doesn't cover: talk only about what's "
+                            "in it")
     copy = copied(sentence, list(passages))
     if copy:
         problems.append(f'copies a passage word for word ("{copy}…"): say it in your own words')
@@ -250,17 +274,13 @@ def violations(text: str, tools_called: set[str], tools_offered: set[str] | None
                sources: list[dict] | None = None, facts: TurnFacts | None = None) -> list[str]:
     """Every broken rule, in plain words (fed back to the model when it rewrites). `tools_offered` = the tools
     the agent had this turn (None = don't check offers to add/log/save/mark). `sources` = what search_gssi
-    returned this turn ([{url, passage}]): the reply cites one url and copies no passage."""
+    returned this turn ([{url, passage}]): the reply copies no passage."""
     problems = list(dict.fromkeys(p for s in re.split(r"(?<=[.!?])\s+|\n+", text) if s.strip()
                                   for p in _sentence_problems(s, tools_called, tools_offered, _passages(sources),
                                                               facts)))
     copy = copied(text, _passages(sources))                  # a copy can run across two sentences
     if copy and not any("copies a passage" in p for p in problems):
         problems.append(f'copies a passage word for word ("{copy}…"): say it in your own words')
-    if sources and not cites(text, sources):
-        numbers = sorted({s["n"] for s in sources})[:3]
-        problems.append(f"cites no source: put a result's number in brackets after the claim it supports "
-                        f"({', '.join(f'[{n}]' for n in numbers)})")
     lines = [line for line in text.splitlines() if line.strip()]
     if len(lines) > MAX_LINES:
         problems.append(f"has {len(lines)} lines (max {MAX_LINES})")

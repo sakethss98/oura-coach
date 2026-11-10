@@ -112,6 +112,14 @@ def plan_workout(request: str | None, config: RunnableConfig) -> tuple[str, dict
     return _plan_reply(planner.run_plan(PLANNER, t.user, t.now, t.use_fixtures, answer, request=blocks))
 
 
+def _offered_to_add_this_turn(messages: list) -> bool:
+    """mark_done found nothing in Oura in reply to their latest message, so it asked whether to add the workout:
+    they haven't answered yet (adding it now would invent its time)."""
+    last_human = max((i for i, m in enumerate(messages) if isinstance(m, HumanMessage)), default=-1)
+    return any(isinstance(m, ToolMessage) and m.name == "mark_done" and isinstance(m.artifact, dict)
+               and m.artifact.get("offered_add") for m in messages[last_human + 1:])
+
+
 def _asked_this_turn(messages: list) -> bool:
     """The question was sent in reply to their latest message: they haven't answered it yet."""
     last_human = max((i for i, m in enumerate(messages) if isinstance(m, HumanMessage)), default=-1)
@@ -178,7 +186,7 @@ def mark_done(feeling: str | None, config: RunnableConfig, workout_type: DoneTyp
             say = f"Oura doesn't have it. {RING_ONLY} {_offer(workout_type, minutes, stated_start)}"
         return (as_json({"done": [], "no_plan_today": True, "oura_has_it": seen is not None, "say": say,
                          "sent_as_is": True}),
-                {"verbatim": say, "wrote": False})
+                {"verbatim": say, "wrote": False, "offered_add": seen is None})
     if feeling:
         db.set_feeling(plan["id"], feeling)
     p, done = plan["plan_json"], plan["blocks_done"]
@@ -205,17 +213,21 @@ def mark_done(feeling: str | None, config: RunnableConfig, workout_type: DoneTyp
         said.append("How did it feel?")
     result["say"] = " ".join(said)
     result["sent_as_is"] = True
-    return as_json(result), {"verbatim": result["say"], "wrote": bool(result["done"]) or bool(feeling)}
+    return as_json(result), {"verbatim": result["say"], "wrote": bool(result["done"]) or bool(feeling),
+                             "offered_add": bool(missing)}
 
 
 @tool
 def add_manual_workout(workout_type: DoneType, minutes: int | None, start_time_text: str | None,
-                       feeling: str | None, config: RunnableConfig) -> str:
+                       feeling: str | None, messages: Messages, config: RunnableConfig) -> str:
     """Add exercise Oura did not record ("did a 30 min walk at 6", or the time they give after
     "Oura doesn't have a matching workout"). Exercise only. If today's plan has a part of this type that
     isn't done, it marks that part done. minutes: as they said, or null (a usual length for the type is
     assumed). start_time_text: when it started, exactly as written, or null (it just ended)."""
     t = turn(config)
+    if _offered_to_add_this_turn(messages):
+        return as_json({"added": False, "reason": "mark_done asked them in this same turn whether to add it: no "
+                                                  "answer yet"})
     length = timedelta(minutes=minutes or default_minutes(workout_type))
     start = parse_clock_time(start_time_text, t.now)
     if start is None:

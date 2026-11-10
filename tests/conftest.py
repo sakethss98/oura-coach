@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core import agent, classifier, db, reply_rules, users  # noqa: E402
+from core import agent, citations, classifier, db, reply_rules, users  # noqa: E402
 from core.config import DB_PATH, FIXTURES_DIR  # noqa: E402
 from modules.nutrition import food  # noqa: E402
 from modules.nutrition import meals  # noqa: E402
@@ -50,12 +50,14 @@ def live(test):
 
 core = pytest.mark.core          # a ★ scenario: must pass every run
 real_mcp = pytest.mark.real_mcp  # starts the real MCP server (tests/test_mcp_tools.py)
+real_embeddings = pytest.mark.real_embeddings  # the citation check with real embeddings (tests/test_citation_check.py)
 
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "live_llm: a scenario against the real model")
     config.addinivalue_line("markers", "core: a ★ scenario (must pass every live run)")
     config.addinivalue_line("markers", "real_mcp: uses the real MCP server instead of the scripted search results")
+    config.addinivalue_line("markers", "real_embeddings: the citation check calls the embeddings API")
 
 
 def pytest_generate_tests(metafunc):
@@ -178,6 +180,18 @@ def fake_gssi(request, monkeypatch):
 
     monkeypatch.setattr(mcp_tools, "call", scripted_call)
     yield calls
+
+
+def same_vector(texts: list[str]) -> list[list[float]]:
+    """Every text gets the same vector: similarity always passes, so the key-term check alone decides."""
+    return [[1.0, 0.0] for _ in texts]
+
+
+@pytest.fixture(autouse=True)
+def fake_embeddings(request, monkeypatch):
+    """The citation check (core/citations.py) makes no embeddings call in scripted tests."""
+    if not (request.node.get_closest_marker("live_llm") or request.node.get_closest_marker("real_embeddings")):
+        monkeypatch.setattr(citations, "embed_texts", same_vector)
 
 
 @pytest.fixture
