@@ -51,11 +51,10 @@ def _sync(t, refresh: bool = False) -> dict:
 
 def _plan_reply(state: dict) -> tuple[str, dict]:
     if state.get("consult"):
-        return ("Question sent to them as is: the rules would change what they asked for. "
-                "Wait for yes or no (confirm_override)."), {"verbatim": state["consult"]}
+        return ("Question sent to them as is: the rules would change what they asked for; their yes or no "
+                "comes next."), {"verbatim": state["consult"]}
     final = state["final_plan"]
-    summary = (f"Plan sent to them as is: {final['workout_type']}, {final['duration_min']} min, {final['time_slot']}. "
-               "Do not repeat it.")
+    summary = f"Plan sent to them as is: {final['workout_type']}, {final['duration_min']} min, {final['time_slot']}."
     return summary, {"verbatim": format_plan(state)}
 
 
@@ -127,15 +126,15 @@ def confirm_override(choice: Literal["yes", "no"], messages: Messages, config: R
     e.g. "ok, the walk"). Also for a yes/no to a question that expired (it tells them)."""
     t = turn(config)
     if _asked_this_turn(messages):
-        return as_json({"planned": False, "reason": "They haven't answered the question yet. Stop and wait."}), {}
+        return as_json({"planned": False, "reason": "the question was asked in this same turn: no answer yet"}), {}
     expire_consults(t)
     pending = db.pending_confirm(t.user.id)
     if pending is None:
         if db.expired_consult(t.user.id, t.day):
-            return ("Told them the question expired. Do not repeat it.",
+            return ("Sent to them as is: the question expired.",
                     {"verbatim": 'That question expired, so nothing was planned. Say "want to work out" '
                                  "to plan one now."})
-        return as_json({"planned": False, "reason": "No question is waiting. Ask what they want."}), {}
+        return as_json({"planned": False, "reason": "no question is waiting"}), {}
     return _plan_reply(planner.answer_consult(PLANNER, t.user, t.now, t.use_fixtures, pending, choice))
 
 
@@ -178,8 +177,7 @@ def mark_done(feeling: str | None, config: RunnableConfig, workout_type: DoneTyp
         else:
             say = f"Oura doesn't have it. {RING_ONLY} {_offer(workout_type, minutes, stated_start)}"
         return (as_json({"done": [], "no_plan_today": True, "oura_has_it": seen is not None, "say": say,
-                         "note": "The say text was sent as is: do not repeat it. On their yes: add_manual_workout "
-                                 "with what they said."}),
+                         "sent_as_is": True}),
                 {"verbatim": say, "wrote": False})
     if feeling:
         db.set_feeling(plan["id"], feeling)
@@ -206,8 +204,7 @@ def mark_done(feeling: str | None, config: RunnableConfig, workout_type: DoneTyp
     if result["done"] and not missing and not feeling:
         said.append("How did it feel?")
     result["say"] = " ".join(said)
-    result["note"] = ("The say text was sent to them as is: do not repeat it. Reply only if they asked something "
-                      "else in the same message (answer that alone), otherwise reply with nothing.")
+    result["sent_as_is"] = True
     return as_json(result), {"verbatim": result["say"], "wrote": bool(result["done"]) or bool(feeling)}
 
 
@@ -245,7 +242,7 @@ def add_manual_workout(workout_type: DoneType, minutes: int | None, start_time_t
 def explain_plan(config: RunnableConfig) -> tuple[str, dict]:
     """The full reasoning, numbers and rule changes behind today's latest plan ("why?")."""
     t = turn(config)
-    return "Explanation sent to them as is. Do not repeat it.", {"verbatim": format_why(db.latest_planned(t.user.id, t.day))}
+    return "Explanation sent to them as is.", {"verbatim": format_why(db.latest_planned(t.user.id, t.day))}
 
 
 @tool
@@ -265,7 +262,7 @@ def workouts(config: RunnableConfig, days_back: int | None = None, start_text: s
     items = history.activity_by_day(t.user, start, end, health.history(t.user, start, end, t.now),
                                     health.manual_by_day(t.user, start, end), rules, plans)
     result = history.summarize(items, plans, rules, t.day, group_by)
-    return as_json({"range": range_label(start, end), **({"note": note} if note else {}), **result})
+    return as_json({"range": range_label(start, end), **({"coverage": note} if note else {}), **result})
 
 
 TOOLS = [start_checkin, submit_checkin, plan_workout, confirm_override, mark_done, add_manual_workout, explain_plan, workouts]

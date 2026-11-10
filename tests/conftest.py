@@ -15,13 +15,13 @@ if not os.getenv("LANGSMITH_TESTS"):
 import icalendar
 import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from pydantic import BaseModel, Field
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core import agent, classifier, db, users  # noqa: E402
+from core import agent, classifier, db, reply_rules, users  # noqa: E402
 from core.config import DB_PATH, FIXTURES_DIR  # noqa: E402
 from modules.nutrition import food  # noqa: E402
 from modules.nutrition import meals  # noqa: E402
@@ -30,6 +30,7 @@ from modules.training import planner as graph  # noqa: E402
 from modules.training import checkin  # noqa: E402
 from modules.training.schemas import Block, CheckinParse, Plan, Request  # noqa: E402
 import today  # noqa: E402
+from core import mcp_tools  # noqa: E402
 
 needs_fixtures = pytest.mark.skipif(
     not (FIXTURES_DIR / "daily_readiness.json").exists(), reason="fixtures/ not present (gitignored)"
@@ -48,11 +49,13 @@ def live(test):
 
 
 core = pytest.mark.core          # a ★ scenario: must pass every run
+real_mcp = pytest.mark.real_mcp  # starts the real MCP server (tests/test_mcp_tools.py)
 
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "live_llm: a scenario against the real model")
     config.addinivalue_line("markers", "core: a ★ scenario (must pass every live run)")
+    config.addinivalue_line("markers", "real_mcp: uses the real MCP server instead of the scripted search results")
 
 
 def pytest_generate_tests(metafunc):
@@ -98,6 +101,26 @@ def judge(message: str, reply: str) -> Verdict:
     return structured_call("judge", Verdict, JUDGE, f"They wrote: {message}\nThe reply: {reply}", job="judge")
 
 
+class CitationVerdict(BaseModel):
+    supported: bool = Field(description="true if every claim marked [n] in the reply is supported by passage n")
+    unsupported: list[str] = Field(description="the [n]-marked claims that passage n does not support (empty if none)")
+    reason: str = Field(description="one short sentence")
+
+
+CITATION_JUDGE = ("You check citations in one reply from a coaching chatbot. Claims in the reply are marked with [n]; "
+                  "passage n is given. For each marked claim, decide whether passage n supports it (it says so, or it "
+                  "clearly follows). Advice about the person's own day (readiness, their week) needs no support. "
+                  "A claim attributed to the source that the passage doesn't contain is unsupported.")
+
+
+def judge_citations(reply: str, sources: list[dict]) -> CitationVerdict:
+    """G rubric check: "Is every [n]-cited claim supported by passage n?" (a real model call; live tests only)."""
+    from core.llm import structured_call
+    passages = "\n\n".join(f"[{s['n']}] {s['title']}: {s['passage']}" for s in sources)
+    return structured_call("judge", CitationVerdict, CITATION_JUDGE, f"Passages:\n{passages}\n\nThe reply: {reply}",
+                           job="judge")
+
+
 class Pushback(BaseModel):
     noticed: bool = Field(description="true if it names what it noticed about their plan or their day")
     honest_call: bool = Field(description="true if it says plainly, and kindly, that the plan works against them")
@@ -119,6 +142,42 @@ def judge_pushback(message: str, reply: str) -> Pushback:
     from core.llm import structured_call
     return structured_call("judge", Pushback, PUSHBACK_JUDGE, f"They wrote: {message}\nThe reply: {reply}",
                            job="judge")
+
+
+# --- knowledge search: scripted tests never start an MCP server ---------------------------------------
+
+GSSI_URLS = {
+    "carbs": "https://www.gssiweb.org/en/sports-science-exchange/article/dietary-carbohydrate-and-the-endurance-athlete-contemporary-perspectives",
+    "drinking": "https://www.gssiweb.org/en/sports-science-exchange/article/fluid-intake-strategies-for-optimal-hydration-and-performance-planned-drinking-vs.-drinking-to-thirst",
+    "caffeine": "https://www.gssiweb.org/en/sports-science-exchange/article/caffeine-and-exercise-performance-an-update",
+}
+# Made-up passages (never article text) with real article urls, so scripted tests can check citing and copying.
+FAKE_SOURCES = [
+    {"title": "Carbohydrate (test)", "url": GSSI_URLS["carbs"], "section": "Before", "year": 2020,
+     "passage": "Test passage one says that runners who eat enough carbohydrate the day before a long run tend to "
+                "feel stronger in the last part of the run than runners who eat less."},
+    {"title": "Drinking (test)", "url": GSSI_URLS["drinking"], "section": "Thirst", "year": 2021,
+     "passage": "Test passage two says that drinking to thirst works well for shorter runs in mild weather."},
+    {"title": "Caffeine (test)", "url": GSSI_URLS["caffeine"], "section": "Dose", "year": 2022,
+     "passage": "Test passage three says that a modest dose taken about an hour before helps many people."},
+]
+
+
+@pytest.fixture(autouse=True)
+def fake_gssi(request, monkeypatch):
+    """search_gssi gets FAKE_SOURCES (no server, no embeddings) in scripted tests; yields the calls made.
+    Live tests and @real_mcp tests use the real server."""
+    if request.node.get_closest_marker("live_llm") or request.node.get_closest_marker("real_mcp"):
+        yield None
+        return
+    calls = []
+
+    def scripted_call(server, tool_name, args):
+        calls.append((server, tool_name, args))
+        return {"results": FAKE_SOURCES[:args.get("k", 4)]}
+
+    monkeypatch.setattr(mcp_tools, "call", scripted_call)
+    yield calls
 
 
 @pytest.fixture
@@ -249,9 +308,14 @@ class ScriptedChat(BaseChatModel):
     seen: list = Field(default_factory=list)       # the messages of each call
     tool_names: list = Field(default_factory=list)  # tools offered in the latest bind_tools
     last_offered: list = Field(default_factory=list)  # the tools the latest agent call was offered
+    tool_choices: list = Field(default_factory=list)  # tool_choice of each bind_tools (None = the model picks)
+    orders_seen: dict = Field(default_factory=dict)   # tool name -> instruction-like text found in its result
 
     def _generate(self, messages, stop=None, run_manager=None, **kwargs) -> ChatResult:
         self.seen.append(list(messages))
+        for m in messages:          # tool results carry facts only: an instruction there gets read back as the reply
+            if isinstance(m, ToolMessage) and reply_rules.instructions(m.content):
+                self.orders_seen[m.name] = reply_rules.instructions(m.content)
         if not self.script:
             raise AssertionError("the agent called the model more often than scripted")
         message = self.script.pop(0)
@@ -269,6 +333,7 @@ class ScriptedChat(BaseChatModel):
 
     def bind_tools(self, tools, **kwargs):
         self.tool_names = [t.name for t in tools]
+        self.tool_choices.append(kwargs.get("tool_choice"))
         return self
 
     @property
@@ -315,6 +380,8 @@ def chat_model(monkeypatch):
     model_classifier = LabeledClassifier()
     monkeypatch.setattr(classifier, "classify", model_classifier)
     yield model
+    if model.orders_seen:
+        pytest.fail(f"Tool results must carry facts only, these give instructions: {model.orders_seen}")
     if model_classifier.unlabeled and not os.getenv("CLASSIFIER_COLLECT"):
         pytest.fail("Label these messages in tests/data/classifier_set.jsonl: " + "; ".join(model_classifier.unlabeled))
 

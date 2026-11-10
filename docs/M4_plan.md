@@ -178,6 +178,21 @@ M3.2 is done and tagged (`m3.2` = 00ed428; CLAUDE.md Status agrees). Live use af
   - With neither, `fueling_plan` gives amounts per kg, says so, and the agent asks once.
 - **D4 reply rules:** when `search_gssi` ran, the reply needs one of its URLs, and copying 12+ words in a row from a returned passage is a violation (n-gram check against this turn's tool results).
 
+> **As built (2026-11-09):**
+> - **Fetching:**
+>   - curl was blocked by gssiweb.org's bot wall. A later ingest run with fetching on (httpx, same honest User-Agent; robots.txt answers 200 with the site's HTML "404" page) fetched all 22 articles, 3 s apart, into `data/gssi_raw/fetched/`. I should have stopped and asked when that happened.
+>   - Decision (2026-11-09): keep those copies, and gssiweb.org is manual only from now on (never requested). A 401/403 or bot-check page stops a host for the run.
+>   - All 22 files were verified: canonical + og:url, title, word count, no bot-check page.
+> - **Fueling ranges:** `config/fueling.yaml` was checked against the indexed text. Ranges not in these articles were dropped or replaced:
+>   - drinking: 400–800 ml/h became "keep the loss under 2%"
+>   - caffeine: 3–6 mg/kg became 1.5–3 mg/kg, with no lead time in minutes
+>   - protein after: 0.3 g/kg became 20–25 g
+>   - day before: 5–7 g/kg became "nothing extra under 90 min, 7–12 g/kg from 90 min"
+>   - sodium: 20–40 mmol/L
+>   - added after review: before = nothing under 60 min (the 1–4 g/kg advice is for > 60 min); recovery carbs 1.0–1.2 g/kg/h for 4 h; the 60–90 g/h tier only past 2.5 h and longer than a half marathon (a half is always 30–60 g/h)
+> - **Citations:** [n] markers, code-built source lines, Telegram HTML with clickable canonical links and no previews.
+> - **`search_gssi`:** defined in our code (`core/mcp_tools.py`) with a fixed schema. It calls the MCP server through langchain-mcp-adapters on a background event loop, so it exists, and falls back, even when the server is down.
+
 **Verify D:**
 - `python scripts/ingest_gssi.py`, twice (the second run is a no-op).
 - `pytest -q tests/test_gssi_retrieval.py`: 5 known questions → the expected URL in the top 4; skipped without an index.
@@ -322,6 +337,9 @@ I'll read both fully and expect to pick FelipeAdachi (no new runtime, a license)
 - **G4:** `docs/demo.md`, a 5-minute script: the Saturday long-run question with its trace, a new category added live, and the eval table.
 
 **After M4:** CLAUDE.md Status + Decisions, README (classifier, skills, MCP servers, program engine; how to add a category, a template, re-ingest GSSI), `scripts/draw_graph.py` redrawn, `git tag m4`.
+
+**Post-M4 review notes (no change before then):**
+- Voice: don't open a pushback with praise ("Nice plan.", "Nice intent.") right before warning against it (seen in M4-8 / M4-10 transcripts, 2026-11-09).
 
 ---
 

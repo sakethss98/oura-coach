@@ -11,3 +11,14 @@ pyyaml>=6.0
 tzdata>=2024.1
 pytest>=8.0
 langgraph-cli[inmem]>=0.3   # for `langgraph dev` (Studio)
+# M4 Part D: GSSI knowledge over our own MCP server
+chromadb>=1.5                 # the vector index (data/gssi_index/, gitignored)
+mcp>=1.30                     # FastMCP server (mcp_servers/gssi/server.py)
+langchain-mcp-adapters>=0.3   # MCP tools as LangChain tools (core/mcp_tools.py)
+trafilatura>=2.3              # article text from HTML
+pypdf>=7.0                    # article text from PDF
+tiktoken>=0.14                # 500-token chunks
+# Pins that keep chromadb's dependencies compatible with the rest (langgraph-api, recurring-ical-events):
+python-dateutil<3
+kubernetes<37
+opentelemetry-sdk~=1.42.1

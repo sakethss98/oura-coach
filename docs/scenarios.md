@@ -85,6 +85,13 @@ M4-1..5 came from live use on 2026-10-17 (xfail in M3.2, must pass from M4 Part 
 - **M4-9** "Should I skip dinner to hit my deficit?" → an honest no, a lighter option, their choice.
 - **M4-10** "Going for a 2-hour run after 5 hours of sleep" → noticed, the honest call, a shorter or easier option (at most two), a short question.
 
+## M4 Part D — GSSI knowledge and fueling (2026-11-09)
+
+- **M4-11** "My long run is Saturday. What should I eat and drink Friday and Saturday?" → readiness or recent training (get_today / workouts), search_gssi and fueling_plan; the amounts are fueling_plan's (sent as built, with their recent carbs from the food log), one sentence of its own tying it to their day with a [n] marker, and the GSSI source line (clickable in Telegram). Must not: amounts of its own, a copied passage.
+- **M4-12** "How long before a run should I have a coffee or energy drink?" → timing and an amount for their weight (fueling_plan, caffeine only) and a GSSI source line.
+- **M4-13** "Do I need electrolytes for a 10k or is water fine?" → water to thirst for a 10 km at their pace, when sodium starts to matter, no weather data, and a GSSI source line.
+- **M4-14** No body weight known (none in Oura, none saved) → amounts per kg and one question for their weight; "I'm 62 kg" → saved, and the next plan is in grams. Must not: a guessed weight, or the question again.
+
 ## Added during Phase 3 (2026-10-18)
 
 - **7c** Same as 7, "yes" 20 min later in a new chat session → still answered (the question lasts 2 h, not one session).

@@ -91,3 +91,115 @@ def test_offers_to_save_or_mark_need_their_tools():
     assert violations("I can mark it done if you like.", set(), {"log_food"})
     assert violations("I can mark it done if you like.", set(), {"mark_done"}) == []
     assert violations("I'll add it once you tell me the time.", set(), {"add_manual_workout"}) == []
+
+
+# --- knowledge search: cite a link, never copy a passage (M4 Part D) ---------------------------------
+
+SOURCE = {"n": 1, "title": "Caffeine and Exercise Performance: An Update",
+          "url": "https://www.gssiweb.org/en/sports-science-exchange/article/caffeine-and-exercise-performance-an-update",
+          "passage": "Test passage says that a modest dose taken about an hour before the run helps many people "
+                     "feel sharper without upsetting the stomach."}
+
+
+def test_a_reply_after_a_search_must_cite_a_result():
+    without = "Have it 30-60 min before the run; a smaller dose is easier on sleep."
+    assert any("cites no source" in p for p in violations(without, {"search_gssi"}, sources=[SOURCE]))
+    assert not violations(without.rstrip(".") + " [1].", {"search_gssi"}, sources=[SOURCE])
+    assert not violations(without + " " + SOURCE["url"], {"search_gssi"}, sources=[SOURCE])   # code makes it [1]
+    assert any("cites no source" in p for p in violations(without + " [4]", {"search_gssi"}, sources=[SOURCE]))
+    assert not violations(without, set(), sources=[])                     # nothing found, nothing to cite
+
+
+def test_twelve_words_in_a_row_from_a_passage_is_a_copy_eleven_is_not():
+    copy = "Good news: a modest dose taken about an hour before the run helps many people [1]."
+    assert any("copies a passage" in p for p in violations(copy, {"search_gssi"}, sources=[SOURCE]))
+    near = "Good news: a modest dose taken about an hour before the run helps [1]."
+    assert not violations(near, {"search_gssi"}, sources=[SOURCE])
+
+
+def test_the_trim_drops_a_copied_sentence():
+    text = "A modest dose taken about an hour before the run helps many people feel sharper. Keep it small."
+    assert enforce(text, {"search_gssi"}, sources=[SOURCE]) == "Keep it small."
+
+
+def test_the_line_next_to_a_fueling_plan_never_restates_an_amount():
+    from core.reply_rules import without_amounts
+    line = ("Readiness is 75, so go for it. Before: 60–250 g carbs, during none. "
+            "Have it about 30-60 min before.\nhttps://www.gssiweb.org/en/x/a-1-4-g-kg")
+    assert without_amounts(line) == ("Readiness is 75, so go for it. Have it about 30-60 min before.\n"
+                                     "https://www.gssiweb.org/en/x/a-1-4-g-kg")
+    assert without_amounts("Aim for 100 mg.") == "" and without_amounts("Try 1.5–3 mg/kg of it.") == ""
+    assert without_amounts("Restore glycogen with about 1.0–1.2 g/kg/h for 4 hours [1].") == ""
+
+
+def test_a_promise_to_recalculate_later_is_never_allowed():
+    assert any("claims" in p for p in violations("I’ll recalc the exact gram amounts and send the plan.", set()))
+
+
+def test_next_to_a_plan_at_most_two_sentences_without_recap_amounts_or_questions():
+    from core.reply_rules import own_line
+    draft = ("Day-before: carb-rich meals. Before: familiar carb meal a few hours out.\n"
+             "Readiness 75 and a light week, so you're set [1]. Any tweaks?")
+    assert own_line(draft) == "Readiness 75 and a light week, so you're set [1]."
+    assert own_line("Light week, so go for it. Aim for 60 g carbs. Want ideas?") == "Light week, so go for it."
+    assert own_line("About 30-60 min before (approx.). Low doses work [1]. More is no better.") == (
+        "About 30-60 min before (approx.). Low doses work [1].")
+    assert own_line("During: nothing. Want ideas?") == ""
+    assert own_line("Caffeine guidance sent (see plan). Light week, so go for it [2].") == "Light week, so go for it [2]."
+    assert own_line("Plan computed without a saved body weight [2]. Day before: Friday [1].") == ""
+    assert own_line("Got your 62 kg. Read the plan and tell me if you want any swaps.") == "Got your 62 kg."
+    assert own_line("You likely won't need extra. Tell me your weight (kg or lb) and I'll give amounts.") == (
+        "You likely won't need extra.")                       # the plan already asks for it, once
+
+
+
+def test_a_fueling_answer_keeps_only_amounts_a_tool_returned():
+    from core.reply_rules import amounts_from
+    tools = "After: 20–25 g protein, with carbs. Carbs 1–1.2 g/kg an hour → 60–75 g an hour."
+    text = "Aim for 20-25 g protein after. That's ~62–74 g/h (~250–300 g total). Go easy."
+    assert amounts_from(text, tools) == "Aim for 20-25 g protein after. Go easy."
+
+
+def test_the_echo_guard_drops_only_instructions_read_back():
+    from core.reply_rules import instructions, without_echo
+    tool = '{"sent_as_is": true, "note": "Add one sentence of your own tying it to their day and readiness"}'
+    orders = instructions(tool)
+    assert orders == ["Add one sentence of your own tying it to their day and readiness"]
+    echoed = "Add one sentence of your own tying it to their day and readiness. Light week, so go [1]."
+    assert without_echo(echoed, orders) == "Light week, so go [1]."
+    assert instructions('{"say": "Oura doesn\'t have it.", "reason": "Ask which day."}') == ["Ask which day."]
+    assert instructions('{"workouts": [{"status": "today, still going"}], "detail": "6.6 h in bed"}') == []
+
+
+def test_facts_the_coach_restates_pass_the_echo_guard():
+    from core.reply_rules import instructions, without_echo
+    from modules.training.tools import RING_ONLY
+    results = ['{"saved": true, "entry": {"text": "2 eggs, toast and chai", "time": "8:10am", "kcal": 320}}',
+               '"Plan sent to them as is: easy_run, 40 min, 7:20-8:00am."',
+               '{"done": [], "say": "Oura doesn\'t have it. ' + RING_ONLY + ' Want me to add 49 min of HIIT at 10:37am?", '
+               '"sent_as_is": true}']
+    orders = [s for r in results for s in instructions(r)]
+    for line in ("Logged 2 eggs, toast and chai at 8:10am.",
+                 "Your easy run is 40 min, 7:20-8:00am, so it fits before work.",
+                 RING_ONLY):
+        assert without_echo(line, orders) == line, line
+
+
+def test_after_a_log_no_question_or_offer():
+    from core.reply_rules import TurnFacts
+    logged = TurnFacts(after_log=True)
+    offer = ("Logged coffee at 8 and banana at 10:30. Those estimates look high — want me to correct either one now?")
+    assert any("after logging" in p for p in violations(offer, {"log_food"}, facts=logged))
+    assert enforce(offer, {"log_food"}, facts=logged) == "Logged coffee at 8 and banana at 10:30."
+    assert not violations("Logged coffee at 8 and banana at 10:30.", {"log_food"}, facts=logged)
+    assert not violations(offer, {"log_food"})                             # without a log, a question is fine
+
+
+def test_more_carbs_next_to_a_plan_that_says_none_is_a_violation():
+    from core.reply_rules import TurnFacts
+    drift = ("Readiness is 75 and you had a light week, so boost carbs on Friday and stick to a familiar, "
+             "easy-to-digest pre-run meal plus your practiced fluid plan on Saturday to top up glycogen [1].")
+    assert any("no extra carbs" in p for p in violations(drift, set(), facts=TurnFacts(carb_load=False)))
+    assert not any("no extra carbs" in p for p in violations(drift, set(), facts=TurnFacts(carb_load=True)))
+    fine = "Readiness is 75 and the week was light, so your usual meals will do [1]."
+    assert not violations(fine, set(), facts=TurnFacts(carb_load=False))

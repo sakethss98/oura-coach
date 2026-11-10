@@ -73,8 +73,7 @@ def range_for(t: Turn, days_back: int | None, start_text: str | None, end_text: 
     """(start, end, note) of the range they asked about, or a result explaining it couldn't be read."""
     found = resolve_range(days_back, start_text, end_text, t.day)
     if found is None:
-        return {"reason": f"Could not read the days {start_text!r} to {end_text!r} (or they are in the future). "
-                          "Ask which days, like 'this week' or 'Oct 1 to Oct 10'."}
+        return {"could_not_read": [start_text, end_text], "reason": "not days that can be read, or in the future"}
     return found
 
 
@@ -99,8 +98,8 @@ def remember(fact: str, kind: str, start_text: str | None, end_text: str | None,
     if start_text or end_text:
         dates = resolve_dates(start_text, end_text, t.day)
         if dates is None:
-            return as_json({"saved": False, "reason": f"Could not read the dates {start_text!r}-{end_text!r}. "
-                                                      "Ask them to say the days again, like Thu-Sat or Oct 12."})
+            return as_json({"saved": False, "could_not_read": [start_text, end_text],
+                            "reason": "the dates can't be read, so nothing was saved"})
         start, end = dates
     fact_row = memory.remember(t.user, fact, kind, start, end, keep_light)
     return as_json({"saved": True, "id": fact_row["id"], "fact": memory.describe(fact_row),
@@ -117,8 +116,8 @@ def forget(memory_ids: list[int], state: Messages, config: RunnableConfig) -> st
     If several facts could match what they said, list them and ask which instead of calling this."""
     last = next((str(m.content) for m in reversed(state) if isinstance(m, HumanMessage)), "")
     if len(set(memory_ids)) > 1 and not FORGET_SEVERAL.search(last):
-        return as_json({"removed": [], "reason": "Several facts match and they didn't say all of them. List them "
-                                                 "and ask which one (or both). Nothing was removed."})
+        return as_json({"removed": [], "reason": "several facts match and the message doesn't say all of them; "
+                                                 "nothing was removed"})
     removed = memory.forget(turn(config).user, memory_ids)
     return as_json({"removed": [memory.describe(f) for f in removed]} if removed
                    else {"removed": [], "reason": "No saved fact with those ids."})
@@ -173,8 +172,8 @@ def refresh_health(config: RunnableConfig) -> str:
               "oura_workouts_today": [{"activity": w["activity"], "start": w["start"][11:16],
                                        "end": w["end"][11:16]} for w in workouts]}
     if not workouts:
-        result["note"] = ("If they said they worked out: Oura only shares workouts the ring recorded (Apple Watch "
-                          "sessions don't come through). Say that and offer to add it (mark_done with what they said).")
+        result["ring_only"] = ("Oura only shares workouts the ring recorded (Apple Watch sessions don't come "
+                               "through).")
     return as_json(result)
 
 
@@ -185,15 +184,13 @@ def get_score(day: str | None, config: RunnableConfig) -> str:
     t = turn(config)
     d = resolve_past_day(day, t.day)
     if d is None:
-        return as_json({"score": None, "reason": f"Could not read the day {day!r}. Ask which day."})
+        return as_json({"score": None, "could_not_read": day})
     result = score.get_score(t.user, d, t.now, t.use_fixtures)
     return as_json({
         "day": f"{d:%A %b} {d.day}", "final": result["final"], "headline": result["headline"],
-        "parts": result["parts"], "left_out": [f"{p['name']} ({p['note']})" for p in result["left_out"]],
+        "parts": [{("detail" if k == "note" else k): v for k, v in p.items()} for p in result["parts"]],
+        "left_out": [f"{p['name']} ({p['note']})" for p in result["left_out"]],
         "still_helps_today": result["next"],
-        "how_to_reply": "Start with the headline as given. Then at most one line on what went well and, if the "
-                        "day isn't final, one kind suggestion from still_helps_today (e.g. 'a 20-min walk would "
-                        "round today out'). Numbers only as given. No blame or guilt words.",
     })
 
 
@@ -224,7 +221,7 @@ def health_range(config: RunnableConfig, metrics: list[HealthMetric] | None = No
         features = {d.isoformat(): history.features(d, by_day, summaries.get("training"), summaries.get("nutrition"))
                     for d in days[1:]}
     result = history.summarize(by_day, start, end, list(metrics or []), group_by, features)
-    return as_json({"range": range_label(start, end), **({"note": note} if note else {}), **result})
+    return as_json({"range": range_label(start, end), **({"coverage": note} if note else {}), **result})
 
 
 @tool
@@ -234,12 +231,12 @@ def day_summary(day_text: str, config: RunnableConfig) -> str:
     t = turn(config)
     d = resolve_past_day(day_text, t.day)
     if d is None:
-        return as_json({"day": None, "reason": f"Could not read the day {day_text!r}. Ask which day."})
+        return as_json({"day": None, "could_not_read": day_text})
     health = Health(t.use_fixtures)
     m = health.history(t.user, d, d, t.now)[d.isoformat()]
     summaries = {mod.name: mod.daily_summaries(t.user, [d], {d.isoformat(): m})[d.isoformat()]
                  for mod in enabled_modules(t.user, health=health)}
-    data = {"day": range_label(d, d), **({"note": "today, still going"} if d == t.day else {}),
+    data = {"day": range_label(d, d), **({"status": "today, still going"} if d == t.day else {}),
             "readiness": m["readiness_score"], "sleep_score": m["sleep_score"], "sleep_hours": m["sleep_hours"],
             "hrv_ms": m["hrv_ms"], "resting_hr": m["resting_hr"], "steps": m["steps"]}
     if "nutrition" in summaries:

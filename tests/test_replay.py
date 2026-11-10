@@ -23,7 +23,7 @@ from connectors.health import Health
 from core import db, memory, score
 from core.agent import CONFIRM_PREVIOUS, EXPIRED_CHECKIN
 from core.coach import VOICE, Coach
-from core.reply_rules import GUILT, violations
+from core.reply_rules import GUILT, copied, violations
 from core.llm import structured_call
 from modules.nutrition import food, meals
 from modules.nutrition.targets import dish_key
@@ -32,8 +32,8 @@ from modules.training.baseline import food_totals
 from modules.training.module import TrainingModule
 from modules.training.planner import LATE_FOLLOW_UP, LATE_WHY
 from modules.training.tools import NO_OURA_MATCH, RING_ONLY
-from tests.conftest import (call, core, ideas, judge, judge_pushback, live, needs_fixtures, parsed_checkin, say,
-                            tool_results)
+from tests.conftest import (GSSI_URLS, call, core, ideas, judge, judge_pushback, live, needs_fixtures,
+                            parsed_checkin, say, tool_results)
 from today import fixtures_now, food_on
 
 pytestmark = needs_fixtures
@@ -285,7 +285,7 @@ def test_4b_two_pizzas_and_the_model_guesses_nothing_is_removed(coach, user, cha
         call("list_food", day="today"), call("remove_food", entry_ids=[first, second]),   # the model guesses
         say("You have two pizza entries, at 1pm and 3pm. Which one should I remove?")])
     assert len(food_today(user)) == 2 and "Which one" in reply
-    assert "didn't say which" in last_tool_result(chat_model, "remove_food")["reason"]
+    assert "doesn't say which" in last_tool_result(chat_model, "remove_food")["reason"]
     chat.send("both", 16, 1, [call("remove_food", entry_ids=[first, second]), say("Removed both pizza entries.")])
     assert food_today(user) == []
 
@@ -375,7 +375,7 @@ def test_list_food_reads_any_past_day(coach, user, chat_model):
     chat.send("and on Oct 6?", 9, 1, [call("list_food", day="Oct 6"), say("Nothing logged on Oct 6.")])
     assert last_tool_result(chat_model, "list_food")["entries"] == []
     chat.send("and next Friday?", 9, 2, [call("list_food", day="next Friday"), say("That hasn't happened yet.")])
-    assert "Could not read the day" in last_tool_result(chat_model, "list_food")["reason"]
+    assert last_tool_result(chat_model, "list_food")["could_not_read"]
 
 
 # --- daily score (Phase 5) ---------------------------------------------------------------------
@@ -410,7 +410,7 @@ def test_29_no_food_logged_scores_nutrition_zero_and_says_not_logged(coach, user
     Chat(coach, user, chat_model).send("how's my day", 12, 0, [call("get_score", day=None),
                                                                say("A walk and some food would round today out.")])
     nutrition = part(score_result(chat_model), "nutrition")
-    assert (nutrition["points"], nutrition["note"]) == (0, "not logged")
+    assert (nutrition["points"], nutrition["detail"]) == (0, "not logged")
     assert "logging what you eat today" in score_result(chat_model)["still_helps_today"]
 
 
@@ -421,7 +421,7 @@ def test_30_under_the_calorie_floor_after_the_cutoff_scores_calories_zero(coach,
     evening = part(score_result(chat_model), "nutrition")
     chat.send("how's my day", 21, 30, score_turn())
     night_ = part(score_result(chat_model), "nutrition")
-    assert "well under your target" not in evening["note"] and "well under your target" in night_["note"]
+    assert "well under your target" not in evening["detail"] and "well under your target" in night_["detail"]
     assert night_["points"] == 14                     # protein full (40% of 30 = 12) + 1 of 3 meals (2); calories 0
     assert score_result(chat_model)["final"] is True
 
@@ -435,7 +435,8 @@ def test_31_after_the_cutoff_food_does_not_change_the_score(coach, user, chat_mo
     final = db.get_daily_score(1, at(12).date())
     assert final["final"] and "a cookie" in [f["raw_text"] for f in food_today(user)]    # logged, not scored
     chat.send("how's my day", 21, 31, score_turn())
-    assert score_result(chat_model)["parts"] == final["result"]["parts"]
+    assert score_result(chat_model)["parts"] == [{("detail" if k == "note" else k): v for k, v in p.items()}
+                                                 for p in final["result"]["parts"]]
     assert score_result(chat_model)["headline"].startswith(f"{final['score']} today")
 
 
@@ -832,8 +833,8 @@ def test_34_low_readiness_with_no_hard_workout_is_not_held_against_them(coach, u
     patch_oura(readiness=64)
     Chat(coach, user, chat_model).send("how's my day", 21, 30, score_turn())
     result = score_result(chat_model)
-    assert "took it easy on a low-readiness day" in part(result, "recovery")["note"]
-    assert part(result, "training")["note"] == "Recovery rest — readiness was 64"
+    assert "took it easy on a low-readiness day" in part(result, "recovery")["detail"]
+    assert part(result, "training")["detail"] == "Recovery rest — readiness was 64"
 
 
 def test_35_one_rest_day_within_the_weekly_budget_is_full_credit(coach, user, chat_model):
@@ -841,7 +842,7 @@ def test_35_one_rest_day_within_the_weekly_budget_is_full_credit(coach, user, ch
     Chat(coach, user, chat_model).send("how's my day", 21, 30, score_turn())
     training = part(score_result(chat_model), "training")
     assert (training["points"], training["of"]) == (35, 35)
-    assert training["note"] == "Rest day — you've trained 5 of the last 7 days"
+    assert training["detail"] == "Rest day — you've trained 5 of the last 7 days"
 
 
 def test_36_a_second_rest_day_in_the_same_7_days_is_missed(coach, user, chat_model, patch_oura):
@@ -849,7 +850,7 @@ def test_36_a_second_rest_day_in_the_same_7_days_is_missed(coach, user, chat_mod
     Chat(coach, user, chat_model).send("how's my day", 21, 30, score_turn())
     training = part(score_result(chat_model), "training")
     assert training["points"] == 0
-    assert training["note"] == "no workout — 2 rest days in the last 7 (your week has 1)"
+    assert training["detail"] == "no workout — 2 rest days in the last 7 (your week has 1)"
 
 
 def test_37_a_low_readiness_rest_day_is_full_credit_without_using_the_budget(coach, user, chat_model,
@@ -858,14 +859,14 @@ def test_37_a_low_readiness_rest_day_is_full_credit_without_using_the_budget(coa
     set_readiness(raw, "2026-10-02", 80)                                          # budget already used
     Chat(coach, user, chat_model).send("how's my day", 21, 30, score_turn())
     training = part(score_result(chat_model), "training")
-    assert (training["points"], training["note"]) == (35, "Recovery rest — readiness was 64")
+    assert (training["points"], training["detail"]) == (35, "Recovery rest — readiness was 64")
 
 
 def test_38_a_travel_fact_makes_a_rest_day_a_recovery_rest(coach, user, chat_model, patch_oura):
     set_readiness(patch_oura(), "2026-10-02", 80)
     memory.remember(user, "Traveling, keep it light", "context", at(12).date(), at(12).date())
     Chat(coach, user, chat_model).send("how's my day", 21, 30, score_turn())
-    assert part(score_result(chat_model), "training")["note"] == "Recovery rest — you noted: Traveling, keep it light"
+    assert part(score_result(chat_model), "training")["detail"] == "Recovery rest — you noted: Traveling, keep it light"
 
 
 # --- live: the real model ------------------------------------------------------------------------
@@ -1689,6 +1690,302 @@ def test_live_38_travel_rest_day(coach, user, patch_oura):
 
 SCENARIOS_DOC = Path(__file__).resolve().parent.parent / "docs" / "scenarios.md"
 # scenario id -> (scripted test, live test). M4 scenarios have only a live test, marked xfail("M4").
+# --- M4 Part D: GSSI knowledge and fueling --------------------------------------------------------
+
+LONG_RUN_QUESTION = "My long run is Saturday. What should I eat and drink Friday and Saturday?"
+COFFEE_QUESTION = "How long before a run should I have a coffee or energy drink?"
+ELECTROLYTES_QUESTION = "Do I need electrolytes for a 10k or is water fine?"
+
+
+def eat_carbs(day_offset: int, carbs: float):
+    db.add_food(1, "rice and dal", {"entry_type": "meal", "est_calories": 600, "est_protein_g": 20,
+                                    "est_carbs_g": carbs}, at(13) - timedelta(days=-day_offset))
+
+
+def test_m4_11_long_run_fueling_is_the_codes_amounts_with_a_line_and_a_link(coach, user, chat_model, fake_gssi):
+    for back, carbs in ((1, 200), (2, 160), (3, 180)):
+        eat_carbs(-back, carbs)
+    line = "Readiness is 75 and the week was easy, so fuel up Friday and enjoy it [1]."
+    reply = Chat(coach, user, chat_model).send(LONG_RUN_QUESTION, 9, 0, [
+        call("get_today", include_health=True), call("workouts", days_back=7),
+        call("search_gssi", query="carbohydrate the day before a long run", k=4),
+        call("fueling_plan", day_text="Saturday"), say(line)])
+    plan, own = reply.split("\n\n")
+    own, source, *amounts = own.split("\n")
+    assert plan.splitlines()[:2] == [
+        "🏃 Run Sat Oct 10 · about 37 min (your longest run in the last 4 weeks; tell me if it's longer)",
+        "Fri: no extra carbs needed, just your usual meals with carbs; lately about 180 g a day (3 days logged)."]
+    assert own == line and source == f"Source [1]: GSSI – Carbohydrate (test) <{GSSI_URLS['carbs']}>"
+    assert amounts and all(line.startswith("Amounts: GSSI – ") for line in amounts)   # the articles behind amounts
+    assert fake_gssi == [("gssi", "search_gssi", {"query": "carbohydrate the day before a long run", "k": 4})]
+
+
+def test_m4_11_a_copied_line_is_dropped_and_the_link_is_still_there(coach, user, chat_model):
+    copy = ("Runners who eat enough carbohydrate the day before a long run tend to feel stronger in the last "
+            "part of the run.")
+    reply = Chat(coach, user, chat_model).send(LONG_RUN_QUESTION, 9, 0, [
+        call("search_gssi", query="carbs before a long run", k=2), call("fueling_plan", day_text="Saturday"),
+        say(copy), say(copy)])                                       # the rewrite copies again: trimmed by code
+    assert copy not in reply and "\nAmounts: GSSI – Dietary Carbohydrate And Endurance Athletes <" in reply
+    assert reply.startswith("🏃 Run Sat Oct 10")
+
+
+def test_m4_12_coffee_before_a_run_is_timed_and_sized_for_their_weight(coach, user, chat_model):
+    reply = Chat(coach, user, chat_model).send(COFFEE_QUESTION, 7, 0, [
+        call("search_gssi", query="caffeine timing before exercise", k=3), call("fueling_plan", parts=["caffeine"]),
+        say(f"A coffee about an hour out gives it time to kick in by the start. {GSSI_URLS['caffeine']}")])  # pasted url
+    assert reply.startswith("Caffeine, if you use it: start low, 1.5–3 mg/kg → 100–210 mg; more doesn't help. Take "
+                            "it about 60 min before the run")                                    # 69.9 kg
+    assert "by the start [3].\nSource [3]: GSSI – Caffeine (test) <" + GSSI_URLS["caffeine"] + ">" in reply
+    assert reply.endswith("Amounts: GSSI – How Sleep Loss Undermines Nutritional Goals <https://www.gssiweb.org/en/"
+                          "sports-science-exchange/article/fueling-performance-starts-with-sleep--how-sleep-loss-"
+                          "undermines-nutritional-goals>")                                  # the timing's article
+    assert "🏃" not in reply
+
+
+def test_m4_13_a_10k_drinks_to_thirst_and_says_there_is_no_weather_data(coach, user, chat_model):
+    reply = Chat(coach, user, chat_model).send(ELECTROLYTES_QUESTION, 7, 0, [
+        call("search_gssi", query="electrolytes sodium shorter runs", k=3),
+        call("fueling_plan", distance_km=10, parts=["fluids"]),
+        say("For about an hour, water is plenty; save electrolytes for long or very sweaty runs [2].")])
+    assert reply.startswith("🏃 Run of 10 km · about 70 min (10 km at about 7 min per km; no usable run pace from Oura)\n"
+                            "Drink: to thirst; water is fine")
+    assert "no weather data" in reply and f"Source [2]: GSSI – Drinking (test) <{GSSI_URLS['drinking']}>" in reply
+
+
+def test_m4_14_no_weight_means_per_kg_one_question_then_grams(coach, user, chat_model, patch_oura):
+    patch_oura()["personal_info"]["weight"] = None
+    chat = Chat(coach, user, chat_model)
+    first = chat.send(LONG_RUN_QUESTION, 9, 0, [call("fueling_plan", day_text="Saturday"), say("Fuel up Friday.")])
+    assert "1–1.2 g per kg an hour" in first and "Tell me your weight" in first
+    again = chat.send("And for Sunday instead?", 9, 2, [call("fueling_plan", day_text="Sunday"), say("")])
+    assert "g per kg" in again and "Tell me your weight" not in again                 # asked once only
+    saved = chat.send("I'm 62 kg", 9, 5, [call("save_body_weight", weight=62, unit="kg"),
+                                          say("Saved 62 kg. That's 1–4 g/kg → 62–248 g.")])   # its own math: dropped
+    assert memory.body_weight(user) == 62 and "\n\nSaved 62 kg.\nAmounts: GSSI" in saved
+    assert chat_model.tool_choices[-2:] == ["save_body_weight", None]   # code made it call the tool first (no math)
+    assert "1–1.2 g/kg an hour → 60–75 g an hour" in saved and "62–248" not in saved          # redone by code
+    grams = chat.send(LONG_RUN_QUESTION, 9, 8, [call("fueling_plan", day_text="Saturday"), say("")])
+    assert "1–1.2 g/kg an hour → 60–75 g an hour" in grams
+
+
+def test_m4_14_minutes_from_an_earlier_plan_are_not_theirs(coach, user, chat_model):
+    reply = Chat(coach, user, chat_model).send(LONG_RUN_QUESTION, 9, 0, [
+        call("fueling_plan", day_text="Saturday", minutes=37), say("")])
+    assert "(your longest run in the last 4 weeks" in reply and "as you said" not in reply
+
+
+def test_m4_13_the_same_plan_called_twice_is_sent_once(coach, user, chat_model):
+    reply = Chat(coach, user, chat_model).send(ELECTROLYTES_QUESTION, 7, 0, [
+        call("fueling_plan", distance_km=10, parts=["fluids"]), call("fueling_plan", distance_km=10, parts=["fluids"]),
+        say("")])
+    assert reply.count("🏃 Run of 10 km") == 1
+
+
+def test_m4_11_a_rewrite_that_talks_about_rewriting_is_not_sent(coach, user, chat_model):
+    reply = Chat(coach, user, chat_model).send(COFFEE_QUESTION, 7, 0, [
+        call("search_gssi", query="caffeine timing", k=3), call("fueling_plan", parts=["caffeine"]),
+        say("Use the fueling_plan amounts about an hour out [3]."),               # a snake_case term: rewrite
+        say("Please paste the reply you want rewritten and I'll fix it.")])
+    assert "paste" not in reply and reply.startswith("Caffeine, if you use it:")
+
+
+def test_m4_11_a_rewrite_next_to_the_plan_gets_the_same_guards(coach, user, chat_model):
+    reply = Chat(coach, user, chat_model).send(LONG_RUN_QUESTION, 9, 0, [
+        call("search_gssi", query="carbs before a long run", k=2), call("fueling_plan", day_text="Saturday"),
+        say("Use the fueling_plan text [1]."),                                   # snake_case: rewrite
+        say("Friday (day before): spread your carbs [1].\nKeep fat low at dinner [2].\nLight week, so go [1]. "
+            "Sound good?")])
+    own = reply.split("\n\n")[1].split("\nSource")[0]
+    assert own == "Keep fat low at dinner [2]. Light week, so go [1]."            # no recap, no question, 2 at most
+
+
+def test_echo_guard_keeps_a_food_confirmation_after_log_food(coach, user, chat_model):
+    reply = Chat(coach, user, chat_model).send("2 eggs, toast and chai at 8:10", 9, 0, [
+        call("log_food", text="2 eggs, toast and chai", time_text="8:10"),
+        say("Logged 2 eggs, toast and chai at 8:10am.")])
+    assert reply.startswith("Logged 2 eggs, toast and chai at 8:10am.")
+
+
+def test_echo_guard_keeps_a_restated_plan_line(coach, user, chat_model):
+    chat = Chat(coach, user, chat_model)
+    chat.send("plan it without asking", 7, 0, [call("plan_workout", request=None), say("")])
+    [plan] = plans_today(user)
+    line = f"Your {plan['plan_json']['workout_type'].replace('_', ' ')} is {plan['plan_json']['duration_min']} min."
+    reply = chat.send("what's my plan today?", 7, 5, [call("get_today", include_health=False), say(line)])
+    assert reply == line
+
+
+def test_echo_guard_keeps_the_oura_ring_only_sentence(coach, user, chat_model, patch_oura):
+    patch_oura()
+    reply = Chat(coach, user, chat_model).send("update from oura", 12, 0, [
+        call("refresh_health"), say(f"Nothing new came in. {RING_ONLY}")])
+    assert reply == f"Nothing new came in. {RING_ONLY}"
+
+
+def test_17_an_offer_after_logging_is_trimmed(coach, user, chat_model):
+    offer = "Logged coffee at 8 and banana at 10:30. Those look high — want me to correct either one now?"
+    reply = Chat(coach, user, chat_model).send("coffee at 8 and a banana at 10:30", 11, 0, [
+        call("log_food", text="coffee", time_text="8"), call("log_food", text="banana", time_text="10:30"),
+        say(offer), say(offer)])                                                 # the rewrite offers again: trimmed
+    assert reply == "Logged coffee at 8 and banana at 10:30."
+
+
+def test_a_food_right_after_a_log_is_a_new_row_not_an_edit(coach, user, chat_model):
+    chat = Chat(coach, user, chat_model)
+    chat.send("had a banana", 10, 0, [call("log_food", text="a banana", time_text=None), say("Logged a banana.")])
+    [first] = food_today(user)
+    chat.send("had a banana", 10, 5, [
+        call("edit_food", entry_id=first["id"], new_text="a banana"),             # no correction in their words
+        call("log_food", text="a banana", time_text=None), say("Logged another banana.")])
+    refused = last_tool_result(chat_model, "edit_food")
+    assert refused["updated"] is False and len(food_today(user)) == 2
+
+
+def test_actually_it_was_2_bananas_is_an_edit(coach, user, chat_model):
+    chat = Chat(coach, user, chat_model)
+    chat.send("had a banana", 10, 0, [call("log_food", text="a banana", time_text=None), say("Logged a banana.")])
+    [entry] = food_today(user)
+    chat.send("actually it was 2 bananas", 10, 2, [call("edit_food", entry_id=entry["id"], new_text="2 bananas"),
+                                                   say("Changed it to 2 bananas.")])
+    [edited] = food_today(user)
+    assert edited["id"] == entry["id"] and edited["raw_text"] == "2 bananas"
+
+
+def test_m4_14_more_carbs_next_to_a_no_extra_carbs_plan_is_trimmed(coach, user, chat_model):
+    drift = ("Readiness is 75 and you had a light week, so boost carbs on Friday and stick to a familiar, "
+             "easy-to-digest pre-run meal plus your practiced fluid plan on Saturday to top up glycogen [1].")
+    reply = Chat(coach, user, chat_model).send(LONG_RUN_QUESTION, 9, 0, [
+        call("search_gssi", query="carbs before a long run", k=2), call("fueling_plan", day_text="Saturday"),
+        say(drift), say(drift)])
+    assert "Fri: no extra carbs needed" in reply and "boost carbs" not in reply
+
+
+@live
+def test_live_citation_judge_flags_a_claim_the_passage_does_not_make():
+    """G rubric "Is every [n]-cited claim supported by passage n?", tried on the M4-12 drift (real passage)."""
+    from mcp_servers.gssi import index as gssi_index
+    from tests.conftest import judge_citations
+    if not gssi_index.INDEX_DIR.exists():
+        pytest.skip("no GSSI index")
+    [hit] = [h for h in gssi_index.search("lower caffeine doses increase endurance performance", 4)
+             if "caffeine-and-exercise" in h["url"]][:1]
+    source = [{"n": 1, **hit}]
+    drift = ("GSSI shows caffeine levels usually peak about 30–60 minutes after you drink it, so time your coffee to "
+             "peak at the start of your run [1].")
+    assert judge_citations(drift, source).supported is False
+    print("\npassage:", hit["passage"][:300])
+    supported = "Low caffeine doses can improve endurance performance [1]."
+    assert judge_citations(supported, source).supported is True
+
+
+def tools_called(since_run_id: int) -> list[str]:
+    """Tool names the agent called, from the runs table (agent calls after run `since_run_id`)."""
+    with db.connect() as conn:
+        rows = conn.execute("SELECT output_json FROM runs WHERE kind = 'agent' AND id > ?", (since_run_id,)).fetchall()
+    return [c["name"] for r in rows for m in json.loads(r["output_json"]) for c in m.get("tool_calls", [])]
+
+
+def last_run_id() -> int:
+    with db.connect() as conn:
+        return conn.execute("SELECT COALESCE(MAX(id), 0) FROM runs").fetchone()[0]
+
+
+@pytest.fixture
+def knowledge(monkeypatch):
+    """Live: records what fueling_plan built and what search_gssi returned (real server, real index)."""
+    from mcp_servers.gssi import index as gssi_index
+    from modules.nutrition import fueling
+    from core import mcp_tools
+    if not gssi_index.INDEX_DIR.exists():
+        pytest.skip("no GSSI index (python scripts/ingest_gssi.py)")
+    from core import citations
+    seen = {"plans": [], "sources": [], "numbered": []}
+    real_plan, real_call, real_numbered = fueling.plan, mcp_tools.call, citations.numbered
+
+    def numbered(earlier, found):          # the [n] numbers search_gssi gave this turn (for the citation judge)
+        result = real_numbered(earlier, found)
+        seen["numbered"] += result
+        return result
+
+    def plan(*args, **kwargs):
+        result = real_plan(*args, **kwargs)
+        seen["plans"].append(result)
+        return result
+
+    def mcp_call(server, tool_name, args):
+        result = real_call(server, tool_name, args)
+        seen["sources"] += (result or {}).get("results", []) if isinstance(result, dict) else []
+        return result
+
+    monkeypatch.setattr(fueling, "plan", plan)
+    monkeypatch.setattr(mcp_tools, "call", mcp_call)
+    monkeypatch.setattr(citations, "numbered", numbered)
+    return seen
+
+
+def assert_cited_in_own_words(reply: str, seen: dict):
+    assert not re.search(r"\b(don't|do not) (repeat|add|offer|ask)\b|sent_as_is|as built", reply, re.I), reply
+    urls = [s["url"] for s in seen["sources"]]
+    assert urls, "search_gssi returned nothing"
+    assert any(f"GSSI – {s['title']} <{s['url']}>" in reply for s in seen["sources"]), "no source line"
+    own = reply
+    for plan in seen["plans"]:
+        own = own.replace(plan["text"], "")
+    assert copied(own, [s["passage"] for s in seen["sources"]]) is None
+    if re.search(r"\[\d\]", own):                    # G rubric: every [n]-cited claim is supported by passage n
+        from tests.conftest import judge_citations
+        verdict = judge_citations(own, list({s["n"]: s for s in seen["numbered"]}.values()))
+        assert verdict.supported, f"unsupported: {verdict.unsupported} ({verdict.reason})"
+
+
+@live
+def test_live_m4_11_long_run_fueling(coach, user, knowledge):
+    for back, carbs in ((1, 200), (2, 160), (3, 180)):
+        eat_carbs(-back, carbs)
+    chat, before = Chat(coach, user), last_run_id()
+    reply = chat.send(LONG_RUN_QUESTION, 9, 0)
+    chat.print("scenario M4-11: long run fueling")
+    from core.citations import to_html
+    print("--- as sent to Telegram (parse_mode=HTML, link previews off) ---\n" + to_html(reply))
+    called = tools_called(before)
+    assert {"fueling_plan", "search_gssi"} <= set(called) and {"get_today", "workouts", "health_range"} & set(called)
+    assert knowledge["plans"] and knowledge["plans"][-1]["text"] in reply              # code's amounts, as built
+    assert "lately about 180 g a day" in reply
+    assert_cited_in_own_words(reply, knowledge)
+
+
+@live
+def test_live_m4_12_coffee_before_a_run(coach, user, knowledge):
+    chat = Chat(coach, user)
+    reply = chat.send(COFFEE_QUESTION, 7, 0)
+    chat.print("scenario M4-12: coffee before a run")
+    assert re.search(r"\b(30|45|60)\b.{0,20}min", reply) and re.search(r"\d+\s*mg", reply)
+    assert_cited_in_own_words(reply, knowledge)
+
+
+@live
+def test_live_m4_13_electrolytes_for_a_10k(coach, user, knowledge):
+    chat = Chat(coach, user)
+    reply = chat.send(ELECTROLYTES_QUESTION, 7, 0)
+    chat.print("scenario M4-13: electrolytes for a 10k")
+    assert "water" in reply.lower() and "weather" in reply.lower()
+    assert_cited_in_own_words(reply, knowledge)
+
+
+@live
+def test_live_m4_14_asks_for_weight_once(coach, user, knowledge, patch_oura):
+    patch_oura()["personal_info"]["weight"] = None
+    chat = Chat(coach, user)
+    first = chat.send(LONG_RUN_QUESTION, 9, 0)
+    second = chat.send("I'm 62 kg", 9, 2)
+    chat.print("scenario M4-14: no weight known")
+    assert first.count("your weight") == 1                           # asked once (amounts per kg, if any)
+    redone = knowledge["plans"][-1]                                  # the plan redone after the weight was saved
+    assert memory.body_weight(user) == 62 and not redone["per_kg"] and redone["text"] in second
+    assert "Tell me your weight" not in second
+
+
 COVERAGE = {
     "1": ("test_1_hi_is_one_line_with_readiness_and_no_llm", "test_live_1_greetings"),
     "1b": ("test_1_greeting_with_more_goes_to_the_agent", "test_live_1_greetings"),
@@ -1761,6 +2058,11 @@ COVERAGE = {
     "M4-8": ("test_m4_8_9_10_pushback_is_kind_with_options", "test_live_m4_8_9_10_pushback"),
     "M4-9": ("test_m4_8_9_10_pushback_is_kind_with_options", "test_live_m4_8_9_10_pushback"),
     "M4-10": ("test_m4_8_9_10_pushback_is_kind_with_options", "test_live_m4_8_9_10_pushback"),
+    "M4-11": ("test_m4_11_long_run_fueling_is_the_codes_amounts_with_a_line_and_a_link", "test_live_m4_11_long_run_fueling"),
+    "M4-12": ("test_m4_12_coffee_before_a_run_is_timed_and_sized_for_their_weight", "test_live_m4_12_coffee_before_a_run"),
+    "M4-13": ("test_m4_13_a_10k_drinks_to_thirst_and_says_there_is_no_weather_data",
+              "test_live_m4_13_electrolytes_for_a_10k"),
+    "M4-14": ("test_m4_14_no_weight_means_per_kg_one_question_then_grams", "test_live_m4_14_asks_for_weight_once"),
 }
 
 

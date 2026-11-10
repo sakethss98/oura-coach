@@ -1,0 +1,8 @@
+# MCP servers the coach calls (core/mcp_tools.py). Each one runs as a child process over stdio and gets only
+# the environment variables named in `env` (values from .env), plus the basics MCP passes (PATH, HOME...).
+servers:
+  gssi:                           # our own server over the GSSI index (M4 Part D)
+    command: python               # "python" = this project's interpreter
+    args: ["-m", "mcp_servers.gssi.server"]
+    env: [OPENAI_API_KEY]         # to embed the query
+    timeout_s: 15

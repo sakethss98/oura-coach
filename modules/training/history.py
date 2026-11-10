@@ -114,7 +114,7 @@ def summarize(items_by_day: dict[str, list[dict]], plans: dict[str, list[dict]],
     }
     if len(days) <= PER_DAY_MAX:
         result["per_day"] = [{"day": day_label(d), "workouts": [item_row(i) for i in by_day[d]]}
-                             | ({"note": "today, still going"} if d == today else {}) for d in days]
+                             | ({"status": "today, still going"} if d == today else {}) for d in days]
     if group_by == "weekday":
         result["by_weekday"] = by_weekday(days, by_day, plans, today)
     elif group_by == "week":

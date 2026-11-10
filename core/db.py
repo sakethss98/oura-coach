@@ -200,6 +200,14 @@ CREATE TABLE IF NOT EXISTS meal_suggestions (
     created_at  TEXT NOT NULL
 );
 
+-- Questions the coach asks once and never again (e.g. their body weight for fueling amounts).
+CREATE TABLE IF NOT EXISTS questions_asked (
+    user_id   INTEGER NOT NULL,
+    question  TEXT NOT NULL,
+    asked_at  TEXT NOT NULL,
+    PRIMARY KEY (user_id, question)
+);
+
 CREATE TABLE IF NOT EXISTS runs (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id      INTEGER,
@@ -849,6 +857,14 @@ def delete_memory(user_id: int, memory_ids: list[int]) -> list[dict]:
 
 
 # --- food log ---------------------------------------------------------------
+
+def ask_once(user_id: int, question: str) -> bool:
+    """True the first time this question is asked of this user (and records it); False ever after."""
+    with connect() as conn:
+        cur = conn.execute("INSERT OR IGNORE INTO questions_asked (user_id, question, asked_at) VALUES (?, ?, ?)",
+                           (user_id, question, _stamp()))
+    return cur.rowcount == 1
+
 
 def add_food(user_id: int, raw_text: str, estimate: dict, eaten_at: datetime,
              user_numbers: list[str] | None = None) -> dict:

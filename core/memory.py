@@ -4,11 +4,12 @@ and temporary context with dates such as "traveling Thu-Sat").
 Written only on an explicit request ("remember..."); never extracted automatically.
 Every agent turn sees the facts that apply today.
 """
+import re
 from datetime import date
 
 from core import db
 
-KINDS = ("goal", "diet", "preference", "instruction", "context")
+KINDS = ("goal", "diet", "preference", "instruction", "context", "body")
 # "Keep it light" while a fact applies, enforced by the training rules (modules/training/policy.py).
 # The model picks the word; the number is code's: light = no HIIT or long run, easy effort at most;
 # very light = walk, mobility or rest only.
@@ -20,6 +21,29 @@ def remember(user, text: str, kind: str = "preference", start: date | None = Non
     if kind not in KINDS:
         kind = "preference"
     return db.add_memory(user.id, text.strip(), kind, start, end, LIGHT_CAPS.get(keep_light))
+
+
+# Body weight is a fact in a fixed form, written and read by code ("Body weight: 62 kg"), never estimated.
+BODY_WEIGHT = "Body weight: {kg:g} kg"
+BODY_WEIGHT_KG = re.compile(r"^Body weight: ([\d.]+) kg$")
+WEIGHT_RANGE_KG = (30, 250)
+
+
+def save_body_weight(user, kg: float) -> dict:
+    """Save their stated weight as the only body-weight fact (an earlier one is replaced)."""
+    old = [f["id"] for f in db.list_memory(user.id) if f["kind"] == "body"]
+    if old:
+        db.delete_memory(user.id, old)
+    return db.add_memory(user.id, BODY_WEIGHT.format(kg=round(kg, 1)), "body")
+
+
+def body_weight(user) -> float | None:
+    """The saved body weight in kg, or None."""
+    for f in reversed(db.list_memory(user.id)):
+        found = BODY_WEIGHT_KG.match(f["text"]) if f["kind"] == "body" else None
+        if found:
+            return float(found.group(1))
+    return None
 
 
 def intensity_caps(user, day: date) -> list[dict]:

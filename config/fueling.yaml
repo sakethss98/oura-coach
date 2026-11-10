@@ -1,0 +1,81 @@
+# Fueling and hydration amounts around a run, used by modules/nutrition/fueling.py (code does every number).
+# Each range names the GSSI Sports Science Exchange article it comes from (docs/gssi_sources.txt); the comments
+# say in our own words where in the article the numbers are (no article text in the repo). Nothing here is from
+# outside those articles. Ranges are picked by the run's minutes: min_minutes <= minutes < max_minutes.
+# Amounts per kg of body weight are turned into grams only with a known weight (never estimated).
+status: checked against the indexed articles 2026-11-09
+
+sources:
+  carbohydrate: https://www.gssiweb.org/en/sports-science-exchange/article/dietary-carbohydrate-and-the-endurance-athlete-contemporary-perspectives
+  during_short: https://www.gssiweb.org/en/sports-science-exchange/article/sse-106-carbohydrate-supplementation-during-exercise-does-it-help-how-much-is-too-much-
+  during_long: https://www.gssiweb.org/en/sports-science-exchange/article/sse-108-multiple-transportable-carbohydrates-and-their-benefits
+  drinking: https://www.gssiweb.org/en/sports-science-exchange/article/fluid-intake-strategies-for-optimal-hydration-and-performance-planned-drinking-vs.-drinking-to-thirst
+  sodium: https://www.gssiweb.org/en/sports-science-exchange/article/the-fluid-replacement-process-principles-of-beverage-formulation-for-athletes
+  caffeine: https://www.gssiweb.org/en/sports-science-exchange/article/caffeine-and-exercise-performance-an-update
+  protein: https://www.gssiweb.org/en/sports-science-exchange/article/the-impact-of-protein-quantity--quality-distribution--and-food-matrix-on-muscleprotein-synthesis
+  caffeine_timing: https://www.gssiweb.org/en/sports-science-exchange/article/fueling-performance-starts-with-sleep--how-sleep-loss-undermines-nutritional-goals
+# The article titles shown in the reply's source lines (as the index has them).
+titles:
+  carbohydrate: Dietary Carbohydrate And Endurance Athletes
+  during_short: "Carbohydrate Supplementation During Exercise: How Much?"
+  during_long: Multiple Transportable Carbohydrates And Their Benefits
+  drinking: Fluid Intake Strategies For Optimal Hydration & Performance
+  sodium: Principles Of Beverage Formulation For Athletes
+  caffeine: "Caffeine And Exercise Performance: An Update"
+  protein: Protein Quality, Quantity & Distribution For Muscle Growth
+  caffeine_timing: How Sleep Loss Undermines Nutritional Goals
+
+# Carbs over the day before. Practical applications: 7-12 g/kg a day before a race or a hard, high-quality
+# session, scaled to how demanding it is; carbs are otherwise matched to the training load ("fuel for the work").
+# The article gives no number for shorter, easier sessions, so none is given here.
+day_before:
+  - {max_minutes: 90, g_per_kg: null, note: "no extra carbs needed, just your usual meals with carbs", source: carbohydrate}
+  - {min_minutes: 90, g_per_kg: [7, 12], note: "more for a longer run", source: carbohydrate}
+# Before competition: 10-12 g/kg a day over the 36-48 h before, when topping up glycogen is the aim.
+race_day_before:
+  - {max_minutes: 90, g_per_kg: null, note: "no carb loading needed for a race this short, just your usual meals with carbs", source: carbohydrate}
+  - {min_minutes: 90, g_per_kg: [10, 12], hours: "36-48", source: carbohydrate}
+
+# Before (practical applications): 1-4 g/kg, eaten 1-4 h before the start, for sessions over 60 min. No number
+# is given for shorter ones.
+before:
+  - {max_minutes: 60, g_per_kg: null, note: "your usual meal or snack is enough for a run under an hour", source: carbohydrate}
+  - {min_minutes: 60, hours: [1, 4], g_per_kg: [1, 4], source: carbohydrate}
+
+# Carbs during, g per hour (absolute, not per kg).
+# SSE 106: all-out efforts under 45 min may not gain from carbs, and runs under an hour are little studied.
+# Carbohydrate article: 30-60 g/h is the recommended range for exercise of 1 to 2.5 h.
+# SSE 108: from 2.5 h on, 90 g/h of mixed glucose and fructose (about 2:1) is the advice; the carbohydrate article
+# puts the step past 2.5-3 h. Here the higher tier needs both: 2.5 h or more AND longer than a half marathon
+# (distance known), so a half marathon is always 30-60 g/h however long it takes.
+# The last range that matches wins (the higher tier is more specific than the 30-60 one).
+during:
+  - {max_minutes: 45, g_per_hour: null, note: "nothing needed", source: during_short}
+  - {min_minutes: 45, max_minutes: 60, g_per_hour: null, note: "nothing needed for most runs under an hour", source: during_short}
+  - {min_minutes: 60, g_per_hour: [30, 60], source: carbohydrate}
+  - {min_minutes: 150, longer_than_km: 21.1, g_per_hour: [60, 90], note: "a glucose and fructose mix, if your stomach is used to it", source: during_long}
+
+# Drinking during (practical applications): thirst is enough for sessions under 60-90 min, cool weather and easy
+# efforts; plan the drinking past 90 min, above all in heat, keeping the body-mass loss under 2% and never
+# gaining weight. A kilogram lost is roughly a liter of sweat. The article gives no ml-per-hour figure.
+fluids:
+  - {max_minutes: 90, plan: thirst, source: drinking}
+  - {min_minutes: 90, plan: planned, max_loss_pct: 2, source: drinking}
+# Sodium in drinks, mmol per liter (23 mg per mmol, converted in code). The beverage article: from about 20-30
+# mmol/L the body holds on to more of the fluid, 18-40 mmol/L makes a drink nicer to drink, and from 50 mmol/L
+# people drink less of it. Given with planned drinking (90+ min), when sweat losses are being replaced.
+sodium:
+  - {max_minutes: 90, mmol_per_liter: null, note: "water is fine; sodium matters on long or very sweaty runs", source: sodium}
+  - {min_minutes: 90, mmol_per_liter: [20, 40], source: sodium}
+
+# Caffeine, if they use it (caffeine article, practical applications): start low, about 100-200 mg (1.5-3 mg/kg);
+# bigger doses add nothing. Low doses help taken before or late in a long session; test it in training first.
+# The caffeine article gives no lead time; the sleep article reports the ISSN advice of taking it 60 min before
+# exercise (and that caffeine can disturb sleep).
+caffeine: {mg_per_kg: [1.5, 3], mg_fixed: [100, 200], minutes_before: 60, source: caffeine, timing_source: caffeine_timing}
+
+# After (practical guidelines): 20-25 g of protein after a session, and with each main meal.
+after: {protein_g: [20, 25], source: protein}
+# Fast recovery (carbohydrate article, practical applications): after a hard, draining session, 1.0-1.2 g/kg of
+# carbs an hour for the first 4 h, then normal meals. Shown for a hard session again later the same day.
+recovery: {g_per_kg_per_hour: [1.0, 1.2], hours: 4, source: carbohydrate}

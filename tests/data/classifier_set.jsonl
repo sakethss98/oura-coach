@@ -81,3 +81,13 @@
 {"text": "Yes", "categories": ["nutrition"], "source": "scenario", "notes": ["The coach's last message before this conversation: 'Want an estimate for that smoothie?'"], "context": "smoothie"}
 {"text": "no", "categories": ["training"], "source": "scenario", "notes": ["A yes/no answer is awaited to the coach's question: \"I'd suggest a 30-min walk instead. Still want HIIT?\""], "context": "A yes/no answer is awaited"}
 {"text": "When did I sleep best this month, and what was different that day?", "categories": ["trends_patterns", "recovery_sleep"], "source": "scenario"}
+{"text": "My long run is Saturday. What should I eat and drink Friday and Saturday?", "categories": ["fueling_hydration"], "source": "scenario"}
+{"text": "How long before a run should I have a coffee or energy drink?", "categories": ["fueling_hydration"], "source": "scenario"}
+{"text": "Do I need electrolytes for a 10k or is water fine?", "categories": ["fueling_hydration"], "source": "scenario", "held_out": true}
+{"text": "And for Sunday instead?", "categories": ["fueling_hydration"], "source": "scenario", "prior_turns": [["them", "My long run is Saturday. What should I eat and drink Friday and Saturday?"], ["coach", "🏃 Run Sat Oct 10 · about 37 min\nFri: carbs 5–7 g per kg over the day.\nTell me your weight and I'll turn these into grams."]]}
+{"text": "I'm 62 kg", "categories": ["fueling_hydration"], "source": "scenario", "prior_turns": [["them", "My long run is Saturday. What should I eat and drink Friday and Saturday?"], ["coach", "🏃 Run Sat Oct 10 · about 37 min\nFri: carbs 5–7 g per kg over the day.\nTell me your weight and I'll turn these into grams."]]}
+{"text": "2 eggs, toast and chai at 8:10", "categories": ["logging"], "source": "scenario"}
+{"text": "plan it without asking", "categories": ["training"], "source": "scenario"}
+{"text": "what's my plan today?", "categories": ["training"], "source": "scenario"}
+{"text": "had a banana", "categories": ["logging"], "source": "scenario"}
+{"text": "actually it was 2 bananas", "categories": ["logging"], "source": "scenario"}

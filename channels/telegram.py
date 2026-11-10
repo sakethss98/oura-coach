@@ -10,10 +10,11 @@ import sqlite3
 import traceback
 
 from langgraph.checkpoint.sqlite import SqliteSaver
-from telegram import Update
+from telegram import LinkPreviewOptions, Update
+from telegram.constants import ParseMode
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
-from core import db, users
+from core import citations, db, users
 from core.coach import Coach
 from core.config import CHECKPOINT_DB_PATH, DEMO_CHECKPOINT_DB_PATH, DEMO_DB_PATH, env, redact
 
@@ -40,7 +41,13 @@ def setup_logging() -> None:
 
 
 async def reply(update: Update, text: str) -> None:
-    await update.effective_message.reply_text(text[:TELEGRAM_MAX_CHARS])
+    """Sent in HTML mode: the text is escaped and only code-built source lines become links; no link previews."""
+    body = citations.to_html(text)
+    while len(body) > TELEGRAM_MAX_CHARS:          # escaping can make it longer: cut the plain text, never a tag
+        text = text[:len(text) - (len(body) - TELEGRAM_MAX_CHARS) - 1]
+        body = citations.to_html(text)
+    await update.effective_message.reply_text(body, parse_mode=ParseMode.HTML,
+                                              link_preview_options=LinkPreviewOptions(is_disabled=True))
 
 
 def sender(update: Update):

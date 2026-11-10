@@ -1,0 +1,38 @@
+# GSSI Sports Science Exchange articles for the oura-coach knowledge index (M4 Part D).
+# URLs only; the article text is never committed. Picked for: running fuel, hydration, caffeine,
+# gut tolerance, protein/strength, vegetarian athletes, female athletes, sleep and wearables.
+# Checked 2026-11-09 from gssiweb.org listing pages.
+
+# Fueling and carbohydrate
+https://www.gssiweb.org/en/sports-science-exchange/article/dietary-carbohydrate-and-the-endurance-athlete-contemporary-perspectives
+https://www.gssiweb.org/en/sports-science-exchange/article/sse-108-multiple-transportable-carbohydrates-and-their-benefits
+https://www.gssiweb.org/en/sports-science-exchange/article/sse-106-carbohydrate-supplementation-during-exercise-does-it-help-how-much-is-too-much-
+https://www.gssiweb.org/en/sports-science-exchange/article/chrono-nutrition-implications-for-athlete-health-and-performance
+https://www.gssiweb.org/en/sports-science-exchange/article/training-the-gut-for-athletes
+https://www.gssiweb.org/sports-science-exchange/Article/the-athlete-gut--gastrointestinal-function--fueling-tolerance--and-the-emerging-role-of-the-microbiome
+
+# Hydration and electrolytes
+https://www.gssiweb.org/en/sports-science-exchange/article/fluid-intake-strategies-for-optimal-hydration-and-performance-planned-drinking-vs.-drinking-to-thirst
+https://www.gssiweb.org/en/sports-science-exchange/article/does-dehydration-really-impair-endurance-performance-recent-methodological-advances-helping-to-clarify-an-old-question
+https://www.gssiweb.org/en/sports-science-exchange/article/the-fluid-replacement-process-principles-of-beverage-formulation-for-athletes
+https://www.gssiweb.org/en/sports-science-exchange/article/hydration-in-physically-active-women
+
+# Caffeine
+https://www.gssiweb.org/sports-science-exchange/article/caffeine-and-exercise-performance-an-update
+
+# Protein, strength and plant-based eating
+https://www.gssiweb.org/en/sports-science-exchange/article/the-impact-of-protein-quantity--quality-distribution--and-food-matrix-on-muscleprotein-synthesis
+https://www.gssiweb.org/en/sports-science-exchange/article/muscle-protein-metabolism-and-protein-requirements-for-female-athletes--aligning-science-with-sex-specific-needs
+https://www.gssiweb.org/en/sports-science-exchange/article/alternative-forms-of-dietary-protein-for-recovery-traditions-challenges-and-opportunities
+https://www.gssiweb.org/en/sports-science-exchange/article/vegetarian-and-vegan-diets-for-athletic-training-and-performance
+https://www.gssiweb.org/en/sports-science-exchange/article/sse-123-nutrition-and-the-molecular-response-to-strength-training
+https://www.gssiweb.org/en/sports-science-exchange/article/sse-117-protein-ingestion-prior-to-sleep-potential-for-optimizing-post-exercise-recovery
+
+# Female athletes
+https://www.gssiweb.org/en/sports-science-exchange/article/practical-approaches-to-nutrition-for-female-athletes
+https://www.gssiweb.org/en/sports-science-exchange/article/fueling-the-female-athlete-bridging-the-gap-from-recommendations-to-changing-behavior
+
+# Sleep, recovery and wearables
+https://www.gssiweb.org/en/sports-science-exchange/article/a-practitioners-guide-to-improving-sleep-in-athletes
+https://www.gssiweb.org/en/sports-science-exchange/article/fueling-performance-starts-with-sleep--how-sleep-loss-undermines-nutritional-goals
+https://www.gssiweb.org/en/sports-science-exchange/article/making-sense-of-wearables-data

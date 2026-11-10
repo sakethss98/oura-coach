@@ -66,7 +66,7 @@ def test_training_totals_longest_run_and_weekday_patterns():
 def test_training_today_never_counts_as_a_day_without():
     items = {MONDAY.isoformat(): []}
     result = training_history.summarize(items, {}, RULES, today=MONDAY)
-    assert result["days_without"] == 0 and result["per_day"][0]["note"] == "today, still going"
+    assert result["days_without"] == 0 and result["per_day"][0]["status"] == "today, still going"
 
 
 def night(day: date, score: int, bedtime: str, steps=6000):
