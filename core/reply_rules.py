@@ -191,7 +191,7 @@ def without_echo(text: str, instruction_texts: list[str]) -> str:
     return "\n".join(lines)
 
 
-ABOUT_THE_PLAN = re.compile(r"\b(sent|see (the )?(plan|above)|(plan|amounts|text) above|(read|computed) the plan|plan "
+ABOUT_THE_PLAN = re.compile(r"\b(sent|see (the )?(plan|above)|(plan|amounts|text)( just)? above|(read|computed) the plan|plan "
                             r"computed|(tell|let) me (if|know|your)|want (any|me|more)|sound good|same plan|re-?run|"
                             r"update the plan|follow (it|that|this|the plan)|plan I (built|made|gave)|already have the plan|any (tweaks|changes|questions)|what do you weigh|how much do you weigh|your weight)\b",
                             re.I)
@@ -202,14 +202,55 @@ ECHO_WORDS = 8          # a sentence sharing 8 words in a row with a tool result
 OFFER_QUESTION = re.compile(r"^\s*(want|would you like|should I|shall I|need|do you want)\b", re.I)
 
 
-def own_line(text: str) -> str:
+NUMBER = re.compile(r"\d+(?:[.,]\d+)*")
+MARKER_TEXT = re.compile(r"\[\d{1,2}\]")
+
+
+def numbers(text: str) -> set[str]:
+    """The numbers in a text, markers left out ("30–60 min [1]" -> {"30", "60"}; "1,200" = "1200", "1.0" = "1")."""
+    found = set()
+    for n in NUMBER.findall(MARKER_TEXT.sub(" ", text)):
+        n = n.replace(",", "")
+        found.add(n.rstrip("0").rstrip(".") if "." in n else n)
+    return found
+
+
+def own_line(text: str, known: str = "") -> str:
     """The coach's own line next to a code-built plan: at most two sentences, in order, without amounts, a recap
-    of the plan or talk about the plan itself ("follow the plan I sent"), clause by clause. A question to them
-    stays ("Is it hot where you run?")."""
-    sentences = [s for s in re.split(r"(?<=[.!?])\s+|\n+", text.strip()) if s and not RECAP.match(s)]
+    of the plan, talk about the plan itself ("follow the plan I sent") or a number that isn't in `known` (the
+    code-built plan and this turn's tool results: "about 30–60 minutes before" next to a plan that says 60 min),
+    clause by clause. A question to them stays ("Is it hot where you run?")."""
+    allowed = numbers(known)
+    sentences = [s for s in re.split(r"(?<=[.!?]\))\s+|(?<=[.!?])\s+|\n+", text.strip())   # "(… above.) Next"
+                 if s and not RECAP.match(s)]
     kept = [k for k in (without_clauses(s, lambda c: AMOUNT.search(c) or ABOUT_THE_PLAN.search(c)
-                                         or OFFER_QUESTION.match(c)) for s in sentences) if k]
+                                         or OFFER_QUESTION.match(c) or numbers(c) - allowed) for s in sentences) if k]
     return " ".join(kept[:OWN_LINE_SENTENCES])
+
+
+# "Logged:" as a label at the start of a sentence, when nothing was logged this turn ("Logged: readiness 75 and a
+# light week…" next to a fueling plan): the label goes, the rest stays.
+LOG_LABEL = re.compile(r"^logged\s*[:–—-]\s*", re.I)
+# The tools that log something (food or a workout). Saving their weight is "saved", never "logged".
+LOGGING_TOOLS = {"log_food", "edit_food", "add_manual_workout", "mark_done"}
+
+
+def without_log_label(text: str, tools_called: set[str]) -> str:
+    """The text without a "Logged:" label opening a sentence, unless a tool logged something this turn."""
+    if tools_called & LOGGING_TOOLS:
+        return text
+    lines = []
+    for line in text.splitlines():
+        kept = []
+        for sentence in re.split(r"(?<=[.!?])\s+", line.strip()):
+            label = LOG_LABEL.match(sentence)
+            if label:
+                sentence = sentence[label.end():]
+                sentence = sentence[:1].upper() + sentence[1:]
+            if sentence:
+                kept.append(sentence)
+        lines.append(" ".join(kept))
+    return "\n".join(lines)
 
 
 def _word_list(text: str) -> list[str]:

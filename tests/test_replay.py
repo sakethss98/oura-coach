@@ -1745,6 +1745,7 @@ def test_m4_11_a_marker_the_passage_does_not_support_is_removed_and_the_sentence
         return scripted(claim, passages, user_id)
     monkeypatch.setattr(citations, "passage_states", check)
     reply = Chat(coach, user, chat_model).send(LONG_RUN_QUESTION, 9, 0, [
+        call("get_today", include_health=True),                      # where its "75" comes from
         call("search_gssi", query="carbohydrate the day before a long run", k=4),
         call("fueling_plan", day_text="Saturday"), say(line)])
     own = reply.split("\n\n")[1].splitlines()
@@ -1854,7 +1855,8 @@ def test_m4_11_a_rewrite_next_to_the_plan_gets_the_same_guards(coach, user, chat
 def test_m4_11_an_own_line_about_a_topic_the_plan_lacks_is_rewritten_once_then_that_sentence_dropped(
         coach, user, chat_model):
     drift = "Readiness is 75 and your week was light. Stick to its caffeine timing."   # the plan has no caffeine line
-    script = [call("search_gssi", query="carbs before a long run", k=2), call("fueling_plan", day_text="Saturday")]
+    script = [call("get_today", include_health=True), call("search_gssi", query="carbs before a long run", k=2),
+              call("fueling_plan", day_text="Saturday")]
     fixed = Chat(coach, user, chat_model).send(LONG_RUN_QUESTION, 9, 0, script + [
         say(drift), say("Readiness is 75 and your week was light, so drink to thirst.")])
     assert fixed.split("\n\n")[1].startswith("Readiness is 75 and your week was light, so drink to thirst.")

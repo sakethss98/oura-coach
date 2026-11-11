@@ -176,24 +176,51 @@ def test_next_to_a_plan_at_most_two_sentences_without_recap_amounts_offers_or_ta
     from core.reply_rules import own_line
     draft = ("Day-before: carb-rich meals. Before: familiar carb meal a few hours out.\n"
              "Readiness 75 and a light week, so you're set [1]. Any tweaks?")
-    assert own_line(draft) == "Readiness 75 and a light week, so you're set [1]."
+    assert own_line(draft, '{"readiness": 75}') == "Readiness 75 and a light week, so you're set [1]."
     assert own_line("Light week, so go for it. Aim for 60 g carbs. Want ideas?") == "Light week, so go for it."
-    assert own_line("About 30-60 min before (approx.). Low doses work [1]. More is no better.") == (
-        "About 30-60 min before (approx.). Low doses work [1].")
+    assert own_line("Have it a bit before (approx.). Low doses work [1]. More is no better.") == (
+        "Have it a bit before (approx.). Low doses work [1].")
     assert own_line("During: nothing. Want ideas?") == ""
     assert own_line("Caffeine guidance sent (see plan). Light week, so go for it [2].") == "Light week, so go for it [2]."
     assert own_line("Plan computed without a saved body weight [2]. Day before: Friday [1].") == ""
-    assert own_line("Got your 62 kg. Read the plan and tell me if you want any swaps.") == "Got your 62 kg."
+    assert own_line("Got your 62 kg. Read the plan and tell me if you want any swaps.",
+                    '{"saved": true, "weight_kg": 62}') == "Got your 62 kg."
     assert own_line("You likely won't need extra. Tell me your weight (kg or lb) and I'll give amounts.") == (
         "You likely won't need extra.")                       # the plan already asks for it, once
     # Clause by clause: what is left of a sentence stays, and a question to them stays.
     assert own_line("Low doses work [1]; follow the timing in the plan I sent.") == "Low doses work [1]."
     assert own_line("Sodium helps you keep fluid [1], and sweat losses run 1–2 L/h, so water is fine — is it hot "
                     "where you run?") == "Sodium helps you keep fluid [1], so water is fine — is it hot where you run?"
-    assert own_line("Water is fine for a 10k.\nDo you sweat a lot?") == "Water is fine for a 10k. Do you sweat a lot?"
+    assert own_line("Water is fine for a 10k.\nDo you sweat a lot?", "Run Sat · 10 km") == (
+        "Water is fine for a 10k. Do you sweat a lot?")
     assert own_line("Water is fine — want a drink plan?") == "Water is fine."
     assert own_line("You already have the plan I built — quick notes: water is fine.") == "Quick notes: water is fine."
+    assert own_line("(Plan text just above.) Scale carbs to the run [1].") == "Scale carbs to the run [1]."
 
+
+
+
+def test_next_to_a_plan_every_number_comes_from_the_plan_or_a_tool_result():
+    from core.reply_rules import numbers, own_line
+    plan = "Caffeine: 100–200 mg, about 60 min before (from the caffeine article)."
+    assert own_line("Have it about 30–60 minutes before. Light week, so go for it.", plan) == "Light week, so go for it."
+    assert own_line("Have it about 60 minutes before. Light week, so go for it.", plan) == (
+        "Have it about 60 minutes before. Light week, so go for it.")
+    assert own_line("Timing is 30–90 min before for many people.", plan) == ""
+    assert own_line("Readiness is 75, so you're set — timing is 30–90 min before for many people.",
+                    plan + ' {"readiness": 75}') == "Readiness is 75, so you're set."
+    assert own_line("Low doses work [2].", plan) == "Low doses work [2]."          # a marker is not a number
+    assert numbers("1,200 kcal, 1.0 g/kg, 1.50 h, [3]") == {"1200", "1", "1.5"}
+
+
+def test_logged_as_an_opener_only_when_something_was_logged():
+    from core.reply_rules import without_log_label
+    text = "Logged: readiness 75 and a light week, so normal meals are fine."
+    assert without_log_label(text, {"save_body_weight", "fueling_plan"}) == (
+        "Readiness 75 and a light week, so normal meals are fine.")
+    assert without_log_label(text, {"log_food"}) == text
+    assert without_log_label("Logged 2 eggs.\nLogged — a 37-min run", {"fueling_plan"}) == (
+        "Logged 2 eggs.\nA 37-min run")                      # only the label; a bare claim is not one (no "I")
 
 
 def test_a_fueling_answer_keeps_only_amounts_a_tool_returned():

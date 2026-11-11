@@ -391,10 +391,11 @@ def respond(state: AgentState, config) -> dict:
         """The echo, amount and own-line guards; run on the draft and again on a rewrite (written anew)."""
         text = reply_rules.without_echo(text, orders)      # never an instruction read back as the reply
         text = reply_rules.without_credit(text)            # credit only in the code's Source / Amounts lines
+        text = reply_rules.without_log_label(text, tools_called)   # no "Logged:" when nothing was logged
         if fueling:
             text = reply_rules.amounts_from(text, tool_texts)
         if beside_plan:     # the code text has the amounts: its own short line, no recap, no offer
-            text = reply_rules.own_line(citations.mark_urls(text, sources))
+            text = reply_rules.own_line(citations.mark_urls(text, sources), tool_texts)   # its numbers: the tools'
         return text
 
     draft = guarded(draft)

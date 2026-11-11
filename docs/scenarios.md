@@ -13,6 +13,10 @@ and values are adapted to the fixtures; the intent is kept. Tests: `tests/test_r
 - Regression = must pass. Capability = target for a later milestone, marked xfail with the milestone name.
 - Every real failure from Telegram becomes a new scenario, with the date it happened.
 
+### Known flaky (for Part G)
+
+- Scenario 5 (live), the third turn "make it higher protein": about 1 run in 4, the model answers in its own words instead of calling `meal_recipe` (seen 2026-11-10 in the full live pass; 3 of 3 on a rerun). The dish stays the same, but the portions aren't code-built. Part G: score it per run and decide whether the nutrition skill forces `meal_recipe` on a change to the last dish.
+
 ## Greeting and replies
 
 - **1 ★** "hi" → one line with readiness + what I can do. No error text.
