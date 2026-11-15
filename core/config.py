@@ -89,10 +89,20 @@ def tracing_client(**kwargs):
     return Client(anonymizer=scrub, **kwargs)
 
 
-def redact_traces() -> None:
-    """Make tracing_client() the client every trace uses (LangChain, LangGraph and @traceable all read it)."""
+def tracing_on() -> bool:
+    """LangSmith tracing is asked for (LANGSMITH_TRACING, or LangChain's older LANGCHAIN_TRACING_V2, is true)."""
+    return any((os.getenv(name) or "").strip().lower() == "true"
+               for name in ("LANGSMITH_TRACING", "LANGCHAIN_TRACING_V2"))
+
+
+def redact_traces() -> bool:
+    """With tracing on, make tracing_client() the client every trace uses (LangChain, LangGraph and @traceable all
+    read it). With tracing off nothing is set up, so importing this module never contacts LangSmith."""
+    if not tracing_on():
+        return False
     import langsmith
     langsmith.configure(client=tracing_client())
+    return True
 
 
 redact_traces()

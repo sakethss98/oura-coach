@@ -40,7 +40,7 @@ def traces(monkeypatch):
     langsmith.configure(client=client, enabled=True)
     yield sent
     wait_for_all_tracers()
-    langsmith.configure(enabled=None)
+    langsmith.configure(enabled=None, client=None)
     config.redact_traces()
 
 
@@ -49,9 +49,21 @@ def uploaded(sent) -> str:
     return "\n".join(b.decode() if isinstance(b, bytes) else str(b) for b in sent)
 
 
-def test_the_app_traces_through_the_redacting_client():
+def test_with_tracing_on_the_app_traces_through_the_redacting_client(monkeypatch):
     from langchain_core.tracers.langchain import get_client
-    assert get_client()._anonymizer is config.scrub
+    monkeypatch.setenv("LANGSMITH_TRACING", "true")
+    try:
+        assert config.redact_traces() and get_client()._anonymizer is config.scrub
+    finally:
+        langsmith.configure(client=None)
+
+
+def test_with_tracing_off_no_client_is_set_up(monkeypatch):
+    monkeypatch.setenv("LANGSMITH_TRACING", "false")
+    monkeypatch.setenv("LANGCHAIN_TRACING_V2", "false")
+    made = []
+    monkeypatch.setattr(config, "tracing_client", lambda **kw: made.append(kw))
+    assert config.redact_traces() is False and made == []
 
 
 def test_redact_hides_our_keys_and_any_key_in_a_url(monkeypatch):
