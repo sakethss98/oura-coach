@@ -10,10 +10,11 @@ tools: [start_checkin, submit_checkin, plan_workout, confirm_override, explain_p
         mark_done, add_manual_workout, goal_today]
 sources: [oura, calendar, plans, check-in]
 rubric:
-  - {check: "A workout request got the check-in question or a plan from a tool, not a plan written by the model", by: code}
-  - {check: "Every number in the reply comes from a tool result", by: code}
-  - {check: "Answers what was asked about training", by: judge}
-  - {check: "Offers one suggestion or at most two options", by: judge}
+  - {check: "A workout it gives with minutes came from a plan tool, not the model's own words", by: code, id: plan_by_code}
+  - {check: "Every number in its own words is in a tool result or their message", by: code, id: numbers_from_tools}
+  - {check: "Its own words break no reply rule (60 words, no source credit, no false claim, no offer it can't keep)", by: code, id: reply_rules}
+  - {check: "It answers what they asked about training, or asks the check-in question first (the designed first step for a workout request)", by: judge}
+  - {check: "If it suggests workouts, it offers one suggestion or at most two options", by: judge}
 ---
 - They want a workout now ("want to work out", "plan my workout", "want HIIT"): start_checkin, with the workout they named copied into request_text ("HIIT", "run + strength"), or null.
 - A reply to the check-in question ("4 2 slept badly", "skip", "5 0 give me run + strength"): submit_checkin with their whole reply copied exactly into answer.

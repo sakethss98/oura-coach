@@ -9,9 +9,9 @@ examples:
 tools: [log_food, edit_food, remove_food, list_food, mark_done, add_manual_workout, refresh_health, get_today]
 sources: [food log, oura, plans]
 rubric:
-  - {check: "The right write tool ran (log_food, edit_food, remove_food, mark_done or add_manual_workout)", by: code}
-  - {check: "A correction changed the same entry, never a new one", by: code}
-  - {check: "No invented times for a workout", by: code}
+  - {check: "A food or workout tool ran (log_food, edit_food, remove_food, list_food, mark_done, add_manual_workout)", by: code, id: tools_called, any: [log_food, edit_food, remove_food, list_food, mark_done, add_manual_workout]}
+  - {check: "No invented numbers or times: every number in its own words is in a tool result or their message", by: code, id: numbers_from_tools}
+  - {check: "Its own words break no reply rule (60 words, no source credit, no false claim, no offer it can't keep)", by: code, id: reply_rules}
 ---
 - Food, drinks, coffee, alcohol, supplements they already had: log_food. One call per thing eaten at a different time ("coffee at 8 and a banana at 10:30" = two calls); things eaten together are one call ("2 eggs, toast and coffee for breakfast"). A food message is always logged, never answered with a question: the same food again (another coffee) is new food at its own time. Copy a clock time exactly as written ("at 1", "8am") into time_text. Numbers they state ("30 cal", "9g carbs") go into the number fields.
 - A correction to food already logged ("correction, it's 3g fiber, 30cal", "it was cheese pizza with olives, edit that") is NEVER a new log_food call: edit_food on that entry, with the full corrected description in new_text if the food changed (keep the amount: "5 slices of pizza" + "it was cheese pizza with olives" = "5 slices of cheese pizza with olives"), and only the numbers they stated. "I don't think it's 60g protein" is not a number they stated: pass it as feedback.

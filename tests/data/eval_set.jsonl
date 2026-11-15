@@ -1,0 +1,46 @@
+{"id": "G-1", "categories": ["nutrition"], "turns": [{"text": "simple dinner ideas, I have dal, rice and spinach", "at": "18:00"}, {"text": "give me the second one", "at": "18:01"}, {"text": "make it higher protein", "at": "18:02"}], "source": "scenario 5", "expect_tools": {"any": ["meal_recipe"]}}
+{"id": "G-2/G-4", "categories": ["fueling_hydration"], "turns": [{"text": "How long before a run should I have a coffee or energy drink?"}], "source": "M4-12", "checks": [{"check": "Its own line says something the plan doesn't, tied to their day", "by": "judge"}]}
+{"id": "G-3", "categories": ["fueling_hydration"], "turns": [{"text": "My long run is Saturday. What should I eat and drink Friday and Saturday?"}], "source": "M4-11", "expect_tools": {"any": ["get_today", "workouts"]}}
+{"id": "G-5", "categories": ["memory"], "turns": [{"text": "remember I'm away sometime soon"}], "source": "scenario 27", "checks": [{"check": "It asks which days they'll be away, as a question", "by": "judge"}]}
+{"id": "G-6", "categories": ["goal_program"], "turns": [{"text": "am I becoming a hybrid athlete by December?"}], "source": "E-10", "setup": ["run_history", "direction"], "checks": [{"check": "It says lifts, muscle or body composition aren't measured", "by": "judge"}]}
+{"id": "G-7", "categories": ["memory"], "turns": [{"text": "what do you know about me?"}], "source": "scenario 32", "setup": ["user2"], "checks": [{"check": "It answers what it knows about them (nothing saved yet) instead of asking a new question", "by": "judge"}]}
+{"id": "G-8", "categories": ["nutrition"], "turns": [{"text": "should I have a Celsius right now?"}], "source": "scenario 15", "checks": [{"check": "It says clearly whether to have it now (yes, no, or wait)", "by": "judge"}]}
+{"id": "training-1", "categories": ["training"], "turns": [{"text": "want HIIT"}], "source": "scenario messages", "expect_tools": {"any": ["start_checkin"]}}
+{"id": "training-2", "categories": ["training"], "turns": [{"text": "give me a run followed by weights"}], "source": "scenario messages"}
+{"id": "training-3", "categories": ["training"], "turns": [{"text": "I'll do HIIT twice today to make up for yesterday"}], "source": "scenario messages"}
+{"id": "training-4", "categories": ["training", "recovery_sleep"], "turns": [{"text": "Going for a 2-hour run after 5 hours of sleep"}], "source": "scenario messages"}
+{"id": "training-5", "categories": ["training"], "turns": [{"text": "what's my plan today?", "at": "07:30"}], "source": "scenario messages"}
+{"id": "logging-1", "categories": ["logging"], "turns": [{"text": "had poha"}], "source": "scenario messages", "expect_tools": {"all": ["log_food"]}}
+{"id": "logging-2", "categories": ["logging"], "turns": [{"text": "I ate 5 slices of pizza at 3pm", "at": "16:00"}], "source": "scenario messages", "expect_tools": {"all": ["log_food"]}}
+{"id": "logging-3", "categories": ["logging"], "turns": [{"text": "coffee at 8 and a banana at 10:30", "at": "11:00"}], "source": "scenario messages", "expect_tools": {"all": ["log_food"]}}
+{"id": "logging-4", "categories": ["logging"], "turns": [{"text": "went for a 30 min walk at 6"}], "source": "scenario messages", "expect_tools": {"any": ["add_manual_workout", "mark_done"]}}
+{"id": "logging-5", "categories": ["logging"], "turns": [{"text": "I did 49 min HIIT at 10:37", "at": "12:00"}], "source": "scenario messages", "expect_tools": {"any": ["add_manual_workout", "mark_done"]}}
+{"id": "logging-6", "categories": ["logging"], "turns": [{"text": "had a banana", "at": "10:00"}, {"text": "actually it was 2 bananas", "at": "10:01"}], "source": "scenario messages", "expect_tools": {"all": ["edit_food"]}}
+{"id": "nutrition-1", "categories": ["nutrition"], "turns": [{"text": "what's left to eat today", "at": "13:00"}], "source": "scenario messages", "setup": ["food_today"], "expect_tools": {"any": ["get_today"]}}
+{"id": "nutrition-2", "categories": ["nutrition"], "turns": [{"text": "How much caffeine is in a 12 oz Celsius?"}], "source": "scenario messages"}
+{"id": "nutrition-3", "categories": ["nutrition"], "turns": [{"text": "Should I skip dinner to hit my deficit?", "at": "18:00"}], "source": "scenario messages", "setup": ["food_today"]}
+{"id": "nutrition-4", "categories": ["nutrition"], "turns": [{"text": "how much protein is in a Chobani plain Greek yogurt?"}], "source": "scenario messages", "expect_tools": {"all": ["food_facts"]}}
+{"id": "memory-1", "categories": ["memory"], "turns": [{"text": "remember I eat eggs"}], "source": "scenario messages", "expect_tools": {"all": ["remember"]}}
+{"id": "memory-2", "categories": ["memory"], "turns": [{"text": "forget my diet stuff"}], "source": "scenario messages", "checks": [{"check": "It lists the diet facts in plain words and asks before removing them", "by": "judge"}]}
+{"id": "memory-3", "categories": ["memory"], "turns": [{"text": "remember I'm traveling Tue-Thu, keep it light"}], "source": "scenario messages", "expect_tools": {"all": ["remember"]}}
+{"id": "memory-4", "categories": ["memory"], "turns": [{"text": "what do you know about me?"}], "source": "scenario messages", "expect_tools": {"any": ["list_memory"]}}
+{"id": "recovery-1", "categories": ["recovery_sleep"], "turns": [{"text": "how hard can I go today?"}], "source": "scenario messages"}
+{"id": "recovery-2", "categories": ["recovery_sleep"], "turns": [{"text": "Why is my HRV lower than usual today?"}], "source": "eval (new)"}
+{"id": "recovery-3", "categories": ["recovery_sleep"], "turns": [{"text": "Should I go to bed earlier tonight?", "at": "20:00"}], "source": "eval (new)"}
+{"id": "trends-1", "categories": ["trends_patterns"], "turns": [{"text": "How much protein did I have over the last week?"}], "source": "scenario messages", "setup": ["food_week"], "expect_tools": {"any": ["food_totals"]}}
+{"id": "trends-2", "categories": ["trends_patterns"], "turns": [{"text": "Which day this week was I lowest on protein?"}], "source": "scenario messages", "setup": ["food_week"]}
+{"id": "trends-3", "categories": ["trends_patterns"], "turns": [{"text": "Summarize Oct 6"}], "source": "scenario messages", "setup": ["food_week"]}
+{"id": "trends-4", "categories": ["trends_patterns", "recovery_sleep"], "turns": [{"text": "How did I sleep this week?"}], "source": "scenario messages"}
+{"id": "fueling-1", "categories": ["fueling_hydration"], "turns": [{"text": "Do I need electrolytes for a 10k or is water fine?"}], "source": "scenario messages"}
+{"id": "goal-1", "categories": ["goal_program"], "turns": [{"text": "I want to run a half marathon on Feb 15 2027"}], "source": "scenario messages", "setup": ["run_history"], "expect_tools": {"all": ["create_goal"]}}
+{"id": "goal-2", "categories": ["goal_program"], "turns": [{"text": "what's today's session?"}], "source": "scenario messages", "setup": ["half_goal"], "expect_tools": {"any": ["goal_today"]}}
+{"id": "goal-3", "categories": ["goal_program"], "turns": [{"text": "am I on track?"}], "source": "scenario messages", "setup": ["half_goal"], "expect_tools": {"any": ["goal_status"]}}
+{"id": "pain-1", "categories": ["pain_injury"], "turns": [{"text": "I have a cold, should I run?"}], "source": "scenario messages"}
+{"id": "pain-2", "categories": ["pain_injury"], "turns": [{"text": "my knee hurts when I run"}], "source": "scenario messages"}
+{"id": "pain-3", "categories": ["pain_injury"], "turns": [{"text": "my knee hurts after long runs"}], "source": "scenario messages"}
+{"id": "pain-4", "categories": ["pain_injury"], "turns": [{"text": "My shin hurts on the outside after runs, should I stop?"}], "source": "eval (new)"}
+{"id": "off-1", "categories": ["off_topic"], "turns": [{"text": "write me a poem"}], "source": "scenario messages"}
+{"id": "off-2", "categories": ["off_topic"], "turns": [{"text": "who won the game last night?"}], "source": "scenario messages"}
+{"id": "off-3", "categories": ["off_topic"], "turns": [{"text": "help me with my taxes"}], "source": "scenario messages"}
+{"id": "off-4", "categories": ["off_topic"], "turns": [{"text": "What's a good movie to watch tonight?"}], "source": "eval (new)"}
+{"id": "off-5", "categories": ["off_topic"], "turns": [{"text": "Can you fix my laptop's wifi?"}], "source": "eval (new)"}

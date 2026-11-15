@@ -9,11 +9,11 @@ examples:
 tools: [get_today, list_food, food_totals, suggest_meal, meal_recipe, food_facts]
 sources: [food log, targets, saved facts, USDA FoodData Central (food_facts)]
 rubric:
-  - {check: "Numbers about their day (eaten, left, targets) match the tool result", by: code}
-  - {check: "Meal ideas come from suggest_meal or meal_recipe, not the model", by: code}
-  - {check: "A general food question gets a direct answer, marked approximate", by: judge}
-  - {check: "Respects their saved diet (vegetarian, eats eggs)", by: judge}
-  - {check: "Numbers for a named food or drink come from food_facts (code), with the USDA FoodData Central line when it answered", by: code}
+  - {check: "Every number in its own words is in a tool result or their message", by: code, id: numbers_from_tools}
+  - {check: "A named food's numbers carry the USDA FoodData Central line when USDA answered", by: code, id: source_lines}
+  - {check: "Its own words break no reply rule (60 words, no source credit, no false claim, no offer it can't keep)", by: code, id: reply_rules}
+  - {check: "It answers their food question directly; numbers not looked up are marked approximate", by: judge}
+  - {check: "If it suggests food, the food fits their saved diet (vegetarian, eats eggs)", by: judge}
 ---
 - What's left today, targets, today's food: get_today. A past day: list_food with the day exactly as they said it. Habits over time: food_totals.
 - Meal ideas ("dinner ideas", "what should I eat now?", "I have dal, rice and spinach", "how much to eat for lunch"): suggest_meal (its text is sent as is). "The second one" / "the recipe": meal_recipe with that dish's name from the ideas. "Make it higher protein": meal_recipe with the same dish and the change. Never write meal ideas yourself.

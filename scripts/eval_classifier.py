@@ -12,7 +12,7 @@ printed (only with --show-held-out), so prompt changes are judged on messages th
 Also: main-category accuracy, per-category accuracy, a confusion matrix of main categories, and every miss
 of the tuning part. Calls are logged to demo.db's runs table (never oura_coach.db).
 
-Usage: python scripts/eval_classifier.py [--workers 6] [--only nutrition] [--show-held-out]
+Usage: python scripts/eval_classifier.py [--workers 6] [--only nutrition] [--show-held-out] [--effort low]
 """
 import argparse
 import json
@@ -123,14 +123,29 @@ def main() -> None:
     parser.add_argument("--workers", type=int, default=6, help="parallel classifier calls")
     parser.add_argument("--only", help="only messages labeled with this category")
     parser.add_argument("--show-held-out", action="store_true", help="also list held-out misses (not for tuning)")
+    parser.add_argument("--effort", help="the classifier's reasoning_effort for this run only (M4 G3b)")
     args = parser.parse_args()
+    if args.effort:
+        models.PARAM_OVERRIDES["classifier"] = {"reasoning_effort": args.effort}
     db.set_db_path(DEMO_DB_PATH)
     db.init_db()
     found = skills.load()
     entries = load_set(args.only)
+    with db.connect() as conn:
+        first = conn.execute("SELECT COALESCE(MAX(id), 0) FROM runs").fetchone()[0]
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         results = list(pool.map(lambda e: route(e, found), entries))
-    sys.exit(0 if report(results, args.show_held_out) else 1)
+    ok = report(results, args.show_held_out)
+    with db.connect() as conn:
+        rows = conn.execute("SELECT model, input_tokens, output_tokens, latency_ms FROM runs WHERE id > ? AND "
+                            "kind = 'classifier'", (first,)).fetchall()
+    if rows:
+        ms = sorted(r["latency_ms"] or 0 for r in rows)
+        cost = sum(models.cost(r["model"], r["input_tokens"], r["output_tokens"]) or 0 for r in rows)
+        print(f"\nreasoning_effort {models.params('classifier').get('reasoning_effort', 'default')}: "
+              f"latency avg {sum(ms) / len(ms) / 1000:.2f} s, p90 {ms[int(0.9 * (len(ms) - 1))] / 1000:.2f} s; "
+              f"{sum(r['output_tokens'] or 0 for r in rows) / len(rows):.0f} output tokens per call; ${cost:.3f}")
+    sys.exit(0 if ok else 1)
 
 
 if __name__ == "__main__":

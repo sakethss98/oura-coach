@@ -24,6 +24,7 @@ class Coach:
     def __init__(self, checkpointer=None, use_fixtures: bool = False):
         self.agent = build_agent(checkpointer)
         self.use_fixtures = use_fixtures
+        self.last_state = None      # the agent's state after the latest message (evals read its tool results)
         self._fixture_day = latest_day(load_fixtures()) if use_fixtures else None
 
     def clock(self, user, msg_time: datetime) -> datetime:
@@ -49,6 +50,7 @@ class Coach:
                                        "use_fixtures": self.use_fixtures},
                       "recursion_limit": RECURSION_LIMIT}
             result = self.agent.invoke({"messages": [HumanMessage(text)]}, config)
+            self.last_state = result
             return result["messages"][-1].content
         return self._exchange(user, msg_time, text, ask_agent)
 

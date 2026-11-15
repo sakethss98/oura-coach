@@ -104,24 +104,8 @@ def judge(message: str, reply: str) -> Verdict:
     return structured_call("judge", Verdict, JUDGE, f"They wrote: {message}\nThe reply: {reply}", job="judge")
 
 
-class CitationVerdict(BaseModel):
-    supported: bool = Field(description="true if every claim marked [n] in the reply is supported by passage n")
-    unsupported: list[str] = Field(description="the [n]-marked claims that passage n does not support (empty if none)")
-    reason: str = Field(description="one short sentence")
-
-
-CITATION_JUDGE = ("You check citations in one reply from a coaching chatbot. Claims in the reply are marked with [n]; "
-                  "passage n is given. For each marked claim, decide whether passage n supports it (it says so, or it "
-                  "clearly follows). Advice about the person's own day (readiness, their week) needs no support. "
-                  "A claim attributed to the source that the passage doesn't contain is unsupported.")
-
-
-def judge_citations(reply: str, sources: list[dict]) -> CitationVerdict:
-    """G rubric check: "Is every [n]-cited claim supported by passage n?" (a real model call; live tests only)."""
-    from core.llm import structured_call
-    passages = "\n\n".join(f"[{s['n']}] {s['title']}: {s['passage']}" for s in sources)
-    return structured_call("judge", CitationVerdict, CITATION_JUDGE, f"Passages:\n{passages}\n\nThe reply: {reply}",
-                           job="judge")
+# The citation judge (G rubric "Is every [n]-cited claim supported by passage n?") lives with the evals.
+from evals.judge import CitationVerdict, judge_citations  # noqa: E402,F401
 
 
 class Pushback(BaseModel):

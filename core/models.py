@@ -16,6 +16,9 @@ MODELS_PATH = ROOT / "config" / "models.yaml"
 ENV_OVERRIDABLE = {"classifier", "citation_check", "agent", "structured"}
 # A call that hangs fails instead of blocking a message or a test run (models.yaml params can change these).
 DEFAULT_PARAMS = {"timeout": 90, "max_retries": 2}
+# Per-job params for this process only, over models.yaml's (scripts/run_evals.py --effort agent=low). The app
+# never sets any; models made before a change keep their params.
+PARAM_OVERRIDES: dict[str, dict] = {}
 
 
 @lru_cache(maxsize=1)
@@ -38,12 +41,17 @@ def model_name(job: str, override: str | None = None) -> str:
     return job_config(job)["model"]
 
 
+def params(job: str) -> dict:
+    """The params a job's model is made with: the defaults, models.yaml's, then this process's overrides."""
+    return {**DEFAULT_PARAMS, **(job_config(job).get("params") or {}), **PARAM_OVERRIDES.get(job, {})}
+
+
 def chat(job: str, override: str | None = None) -> ChatOpenAI:
     """The chat model for `job`. No temperature is set (gpt-5 models reject non-default values)."""
     c = job_config(job)
     if c["provider"] != "openai":
         raise ValueError(f"Provider {c['provider']!r} is not supported yet (job {job})")
-    return ChatOpenAI(model=model_name(job, override), **{**DEFAULT_PARAMS, **(c.get("params") or {})})
+    return ChatOpenAI(model=model_name(job, override), **params(job))
 
 
 def embeddings() -> OpenAIEmbeddings:

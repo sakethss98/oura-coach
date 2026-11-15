@@ -9,16 +9,12 @@ examples:
 tools: [fueling_plan, search_gssi, get_today, food_totals, workouts, health_range, save_body_weight]
 sources: [GSSI Sports Science Exchange (search_gssi), config/fueling.yaml (fueling_plan), food log, oura, workouts]
 rubric:
-  - {check: "fueling_plan and search_gssi were called", by: code}
-  - {check: "Every amount in the reply is one fueling_plan computed (its text is sent as built)", by: code}
-  - {check: "A [n] marker only on a claim passage n states (one yes/no call per marker, unsupported markers removed); copies no passage", by: code}
-  - {check: "Its own line names no fueling topic the plan lacks (its question, readiness and training are fine)", by: code}
-  - {check: "Its own line next to the plan has no numbers (amounts and times are the plan's)", by: code}
-  - {check: "Never names GSSI or USDA in its own words (credit only in the code's Source / Amounts lines)", by: code}
-  - {check: "Timing and amounts are concrete (e.g. 2-3 hours before, about 500 ml)", by: judge}
-  - {check: "Uses their recent food or training when it is relevant", by: judge}
-  - {check: "Says it has no weather data when the question depends on the weather", by: judge}
-  - {check: "Every [n]-cited claim is supported by passage n", by: judge}
+  - {check: "fueling_plan and search_gssi were called", by: code, id: tools_called, all: [fueling_plan, search_gssi]}
+  - {check: "Every number in its own words is in a tool result or their message", by: code, id: numbers_from_tools}
+  - {check: "Its own words break no reply rule (60 words, no source credit, no false claim, no offer it can't keep)", by: code, id: reply_rules}
+  - {check: "Each [n] left in the reply has its Source line with a link", by: code, id: source_lines}
+  - {check: "Its own line ties the answer to their day or recent training (readiness, last runs, food), in words", by: judge}
+  - {check: "Every [n]-cited claim is supported by passage n", by: judge, id: citations}
 ---
 - fueling_plan's text is sent to them as built (sent_as_is): your words come after it. If it asked for their weight (asked_for_weight), don't ask again.
 - Amounts come from fueling_plan, never from you: call it with only the parts they asked about (["caffeine"] for coffee or an energy drink before a run, ["fluids"] for water or electrolytes, null for a whole long-run or race plan), the run's day as they said it, and minutes or distance only if they said them ("a 10k" = distance_km 10). Its text is sent to them as is: don't repeat its numbers.

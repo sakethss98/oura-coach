@@ -11,30 +11,12 @@ from core import db
 from core.reply_rules import GUILT
 from modules.goals import direction, service
 from tests.conftest import call, judge, live, needs_fixtures, parsed_checkin, say
+from evals.setups import ANSWERS, RACE, history, novice_runs, set_up  # noqa: F401  (shared with evals)
 from tests.test_replay import Chat, at, coach  # noqa: F401  (coach is a fixture)
 
 pytestmark = needs_fixtures          # the scenarios run on fixtures/ (gitignored personal data)
 
-RACE = date(2027, 2, 15)
 GOAL = "I want to run a half marathon on Feb 15 2027"
-ANSWERS = {"days_per_week": 5, "minutes_per_session": 90, "longest_session_min": 150, "limits": "none",
-           "equipment": "gym", "long_session_day": "sunday", "target_time": 150}
-
-
-def history(raw, today: date, runs: list[tuple[int, float, int]]) -> None:
-    """Runs on past days, as Oura records them: [(days back, km, minutes < 60)]."""
-    template = raw["workout"]["data"][0]
-    for n, (back, km, minutes) in enumerate(runs):
-        d = today - timedelta(days=back)
-        raw["workout"]["data"].append({**template, "id": f"history-{n}", "activity": "running", "day": d.isoformat(),
-                                       "intensity": "moderate", "start_datetime": f"{d}T07:00:00.000-05:00",
-                                       "end_datetime": f"{d}T07:{minutes:02d}:00.000-05:00", "distance": km * 1000})
-
-
-def novice_runs(minutes: tuple[int, int, int] = (39, 32, 33)) -> list[tuple[int, float, int]]:
-    """Six weeks of three runs (6, 5 and 5 km in these minutes): about 16 km a week, the longest 6 km."""
-    six, five, other = minutes
-    return [r for w in range(6) for r in ((7 * w + 2, 6, six), (7 * w + 4, 5, five), (7 * w + 6, 5, other))]
 
 
 @pytest.fixture
@@ -43,20 +25,6 @@ def runner(patch_oura):
     today = at(9).date()
     history(raw, today, novice_runs())
     return raw
-
-
-def set_up(user, day: date, answers=ANSWERS, event=RACE) -> dict:
-    """An active half-marathon plan made `day` (it starts the day after), without the chat."""
-    goal = db.add_goal(user.id, "half marathon", "half_marathon", event, "setting_up")
-    for key, value in answers.items():
-        db.set_goal_answer(goal["id"], key, value, "user")
-    now = at(9) - timedelta(days=(at(9).date() - day).days)
-    service.refresh_data_answers(goal, service.library.load("half_marathon"),
-                                 service.signals_for(user, True, day - timedelta(days=42), day, now), day)
-    service.proposal(user, db.get_goal(goal["id"]), day, now, True)
-    service.activate(user, db.get_goal(goal["id"]), day, now, True)
-    assert db.get_goal(goal["id"])["status"] == "active"
-    return db.get_goal(goal["id"])
 
 
 # --- E-1 set up a dated goal, E-13 a target time ----------------------------------------------------------

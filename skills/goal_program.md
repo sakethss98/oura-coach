@@ -13,11 +13,11 @@ tools: [create_goal, answer_goal, confirm_goal, goal_today, goal_status, choose_
         remember, list_memory, search_gssi, start_checkin, plan_workout]
 sources: [goal plan, workouts, food log, oura, saved facts, GSSI Sports Science Exchange (search_gssi)]
 rubric:
-  - {check: "Numbers about their training (sessions, longest run, km) match the tool result", by: code}
-  - {check: "Gives an honest call on feasibility or progress, with one reason", by: judge}
-  - {check: "Says what it can't measure (muscle, body composition) instead of guessing", by: judge}
-  - {check: "Every [n]-cited claim is supported by passage n", by: judge}
-  - {check: "A goal is set up only after the plan was shown and they said yes (confirm_goal)", by: code}
+  - {check: "Every number in its own words is in a tool result or their message", by: code, id: numbers_from_tools}
+  - {check: "A goal is set up (confirm_goal) only after they saw the plan and said yes", by: code, id: confirm_after_yes}
+  - {check: "When it judges a goal or their progress, the call is honest and has a reason (n/a while it is still asking the setup questions)", by: judge}
+  - {check: "If they ask about muscle, body composition or how they look, it says it can't measure that", by: judge}
+  - {check: "Its own words break no reply rule (60 words, no source credit, no false claim, no offer it can't keep)", by: code, id: reply_rules}
 ---
 - Setting up a goal ("I want to run a half marathon in the spring"): create_goal with their words and the date as written. Then their answers go to answer_goal, only what they said (an injury: save_limit first, then limits "saved"). When the plan is shown with "Set it up?", their yes or no goes to confirm_goal. The questions and the plan are sent to them as built: don't repeat them.
 - A workout for right now ("plan it", "want to work out"): start_checkin, or plan_workout when they skip the questions (today's program session is used when they name none).

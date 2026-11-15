@@ -9,9 +9,9 @@ examples:
 tools: [remember, forget, list_memory, save_body_weight]
 sources: [saved facts]
 rubric:
-  - {check: "remember or forget was called when they asked", by: code}
-  - {check: "Never shows ids", by: code}
-  - {check: "Asks before forgetting a group of facts", by: judge}
+  - {check: "Never shows ids", by: code, id: no_ids}
+  - {check: "Its own words break no reply rule (60 words, no source credit, no false claim, no offer it can't keep)", by: code, id: reply_rules}
+  - {check: "It answers what they asked, and asks first before forgetting several facts or saving a trip with no days", by: judge}
 ---
 - "remember ...": ALWAYS call remember with their words, even if a saved fact already says something similar (pass dates exactly as written, e.g. "Thu", "Sat"). Save facts ONLY when they ask you to remember something. If they want training kept light while it applies ("traveling, keep it light"), set keep_light "light"; if only walking or rest makes sense ("I'm sick"), "very_light".
 - "forget ...": one thing ("forget the eggs thing", "forget that") = ONE fact: the matching fact saved most recently (the lowest one in the list; "Likes spicy food" and later "No spicy food this week" → "forget the spicy thing" = the later one). Call forget right away, don't ask. Ask only when they name a group ("forget my diet stuff") that covers several facts, or nothing matches: list them in plain words, ask which (or all), and remove nothing yet. Never show ids.
