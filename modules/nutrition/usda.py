@@ -12,7 +12,8 @@ Parsing is built from responses saved in fixtures/usda/ (2026-11-15):
   portionDescription ("1 cup, cooked", FNDDS), amount + modifier ("tablespoon", SR Legacy) or amount +
   measureUnit.name ("piece", Foundation), each with gramWeight.
 - The search's dataType filter answered 400 for some single types, so code searches unfiltered and filters itself.
-- Error results are plain text that includes the request url with the api key: never shown, logged only redacted.
+- Error results are plain text that includes the request url with the api key: mcp_tools.call scrubs it before
+  code sees it, and LangSmith traces go through config.tracing_client's anonymizer; never shown, logged redacted.
 """
 import logging
 import re

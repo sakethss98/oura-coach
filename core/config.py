@@ -1,5 +1,6 @@
 """Settings and constants shared across the project."""
 import os
+import re
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -55,13 +56,46 @@ def check_keys() -> dict[str, bool]:
     return found
 
 
+# A key passed as a url query parameter (the USDA server's error text has its request url): hidden even when the
+# value isn't one of ours.
+KEY_IN_URL = re.compile(r"\b((?:api_key|apikey|access_token|token)=)[^&\s\"'<>]+", re.I)
+
+
 def redact(text: str) -> str:
-    """Replace any secret value from the environment with [redacted]."""
+    """Replace any secret value from the environment, and any key in a url, with [redacted]."""
     for name in SECRET_ENV_VARS:
         value = os.getenv(name)
         if value and len(value) >= 6:
             text = text.replace(value, "[redacted]")
-    return text
+    return KEY_IN_URL.sub(r"\1[redacted]", text)
+
+
+def scrub(data):
+    """redact() over every string in a value (dicts, lists and tuples, any depth); other values unchanged."""
+    if isinstance(data, str):
+        return redact(data)
+    if isinstance(data, dict):
+        return {scrub(k): scrub(v) for k, v in data.items()}
+    if isinstance(data, (list, tuple)):
+        return type(data)(scrub(v) for v in data)
+    return data
+
+
+def tracing_client(**kwargs):
+    """A LangSmith client that scrubs every run's inputs, outputs, error and metadata before it leaves the process
+    (its `anonymizer`). Traces come from every LangChain call, also ones code never sees the text of, like the MCP
+    adapters' own tool runs, so this is the one place that covers them all."""
+    from langsmith import Client
+    return Client(anonymizer=scrub, **kwargs)
+
+
+def redact_traces() -> None:
+    """Make tracing_client() the client every trace uses (LangChain, LangGraph and @traceable all read it)."""
+    import langsmith
+    langsmith.configure(client=tracing_client())
+
+
+redact_traces()
 
 # A "still want HIIT?" question left unanswered this long becomes the suggested plan.
 CONSULT_TTL_MIN = 120

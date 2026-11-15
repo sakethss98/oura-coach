@@ -26,7 +26,7 @@ from langchain_mcp_adapters.tools import load_mcp_tools
 from langgraph.prebuilt import InjectedState
 
 from core import citations
-from core.config import ROOT
+from core.config import ROOT, scrub
 
 CONFIG_PATH = ROOT / "config" / "mcp.yaml"
 DEFAULT_TIMEOUT_S = 15
@@ -124,10 +124,12 @@ def _as_data(result):
 
 
 def call(server: str, tool_name: str, args: dict):
-    """The tool's result as JSON data, or None when the server is down, slow or failed (logged by error type)."""
+    """The tool's result as JSON data, or None when the server is down, slow or failed (logged by error type).
+    Every string in it is scrubbed of secrets first: a server's error text can carry its key (the USDA server's
+    has its request url), and nothing after this point (tool results, the model, logs) should ever see one."""
     timeout = server_config()[server].get("timeout_s", DEFAULT_TIMEOUT_S)
     try:
-        return _as_data(_servers.call(server, tool_name, args, timeout))
+        return scrub(_as_data(_servers.call(server, tool_name, args, timeout)))
     except Exception as e:
         log.warning("MCP %s.%s unavailable: %s", server, tool_name, type(e).__name__)
         return None
