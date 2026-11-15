@@ -23,7 +23,7 @@ from connectors.health import Health
 from core import citations, db, memory, score
 from core.agent import CONFIRM_PREVIOUS, EXPIRED_CHECKIN
 from core.coach import VOICE, Coach
-from core.reply_rules import GUILT, copied, topics, violations
+from core.reply_rules import GUILT, copied, has_digit, topics, violations
 from core.llm import structured_call
 from modules.nutrition import food, meals
 from modules.nutrition.targets import dish_key
@@ -1719,7 +1719,7 @@ def eat_carbs(day_offset: int, carbs: float):
 def test_m4_11_long_run_fueling_is_the_codes_amounts_with_a_line_and_a_link(coach, user, chat_model, fake_gssi):
     for back, carbs in ((1, 200), (2, 160), (3, 180)):
         eat_carbs(-back, carbs)
-    line = ("Readiness is 75 and the week was easy. Eating enough carbohydrate the day before a long run helps you "
+    line = ("Readiness is solid and the week was easy. Eating enough carbohydrate the day before a long run helps you "
             "feel stronger late in the run [1].")                       # what passage 1 says, in other words
     reply = Chat(coach, user, chat_model).send(LONG_RUN_QUESTION, 9, 0, [
         call("get_today", include_health=True), call("workouts", days_back=7),
@@ -1737,7 +1737,7 @@ def test_m4_11_long_run_fueling_is_the_codes_amounts_with_a_line_and_a_link(coac
 
 def test_m4_11_a_marker_the_passage_does_not_support_is_removed_and_the_sentence_stays(coach, user, chat_model,
                                                                                       monkeypatch):
-    line = "Readiness is 75 and the week was easy, so fuel up Friday and enjoy it [1]."    # about their day, not GSSI
+    line = "Readiness is solid and the week was easy, so fuel up Friday and enjoy it [1]."   # about their day, not GSSI
     asked, scripted = [], citations.passage_states
 
     def check(claim, passages, user_id=None):
@@ -1745,13 +1745,13 @@ def test_m4_11_a_marker_the_passage_does_not_support_is_removed_and_the_sentence
         return scripted(claim, passages, user_id)
     monkeypatch.setattr(citations, "passage_states", check)
     reply = Chat(coach, user, chat_model).send(LONG_RUN_QUESTION, 9, 0, [
-        call("get_today", include_health=True),                      # where its "75" comes from
+        call("get_today", include_health=True),
         call("search_gssi", query="carbohydrate the day before a long run", k=4),
         call("fueling_plan", day_text="Saturday"), say(line)])
     own = reply.split("\n\n")[1].splitlines()
-    assert own[0] == "Readiness is 75 and the week was easy, so fuel up Friday and enjoy it."
+    assert own[0] == "Readiness is solid and the week was easy, so fuel up Friday and enjoy it."
     assert "Source" not in reply and own[1].startswith("Amounts: GSSI – Dietary Carbohydrate")   # amounts still cited
-    assert asked == ["Readiness is 75 and the week was easy, so fuel up Friday and enjoy it"]   # one question
+    assert asked == ["Readiness is solid and the week was easy, so fuel up Friday and enjoy it"]   # one question
 
 
 def test_m4_11_a_copied_line_is_dropped_and_the_link_is_still_there(coach, user, chat_model):
@@ -1800,7 +1800,7 @@ def test_m4_14_no_weight_means_per_kg_one_question_then_grams(coach, user, chat_
     assert "g per kg" in again and "Tell me your weight" not in again                 # asked once only
     saved = chat.send("I'm 62 kg", 9, 5, [call("save_body_weight", weight=62, unit="kg"),
                                           say("Saved 62 kg. That's 1–4 g/kg → 62–248 g.")])   # its own math: dropped
-    assert memory.body_weight(user) == 62 and "\n\nSaved 62 kg.\nAmounts: GSSI" in saved
+    assert memory.body_weight(user) == 62 and "\n\nWeight saved: 62 kg.\nAmounts: GSSI" in saved   # by code
     assert chat_model.tool_choices[-2:] == ["save_body_weight", None]   # code made it call the tool first (no math)
     assert "1–1.2 g/kg an hour → 60–75 g an hour" in saved and "62–248" not in saved          # redone by code
     grams = chat.send(LONG_RUN_QUESTION, 9, 8, [call("fueling_plan", day_text="Saturday"), say("")])
@@ -1818,6 +1818,20 @@ def test_m4_14_a_weight_answer_routed_elsewhere_still_saves_it_and_code_does_the
     saved = chat.send("I'm 62 kg", 9, 2, [call("save_body_weight", weight=62, unit="kg"), say("Saved 62 kg.")])
     assert memory.body_weight(user) == 62 and chat_model.tool_choices[-2] == "save_body_weight"
     assert "1–1.2 g/kg an hour → 60–75 g an hour" in saved                     # redone by code, not the model
+
+
+def test_m4_14_a_saved_weight_the_reply_doesnt_mention_is_confirmed_by_code(coach, user, chat_model, patch_oura):
+    patch_oura()["personal_info"]["weight"] = None
+    chat = Chat(coach, user, chat_model)
+    chat.send(LONG_RUN_QUESTION, 9, 0, [call("fueling_plan", day_text="Saturday"), say("Fuel up Friday.")])
+    saved = chat.send("I'm 62 kg", 9, 2, [call("save_body_weight", weight=62, unit="kg"), say("Nice.")])
+    plan, confirmed, own = saved.split("\n\n")
+    assert plan.startswith("🏃 Run Sat Oct 10") and confirmed == "Weight saved: 62 kg."
+    assert own.startswith("Nice.\nAmounts: GSSI")
+    chat = Chat(coach, user, chat_model)
+    chat.send(LONG_RUN_QUESTION, 11, 0, [call("fueling_plan", day_text="Saturday"), say("Fuel up Friday.")])
+    said = chat.send("I'm 62 kg", 11, 2, [call("save_body_weight", weight=62, unit="kg"), say("Saved, thanks.")])
+    assert "Weight saved:" not in said and "Saved, thanks." in said            # it said so: nothing added
 
 
 def test_m4_14_minutes_from_an_earlier_plan_are_not_theirs(coach, user, chat_model):
@@ -1854,15 +1868,15 @@ def test_m4_11_a_rewrite_next_to_the_plan_gets_the_same_guards(coach, user, chat
 
 def test_m4_11_an_own_line_about_a_topic_the_plan_lacks_is_rewritten_once_then_that_sentence_dropped(
         coach, user, chat_model):
-    drift = "Readiness is 75 and your week was light. Stick to its caffeine timing."   # the plan has no caffeine line
+    drift = "Readiness is solid and your week was light. Stick to its caffeine timing."   # the plan has no caffeine line
     script = [call("get_today", include_health=True), call("search_gssi", query="carbs before a long run", k=2),
               call("fueling_plan", day_text="Saturday")]
     fixed = Chat(coach, user, chat_model).send(LONG_RUN_QUESTION, 9, 0, script + [
-        say(drift), say("Readiness is 75 and your week was light, so drink to thirst.")])
-    assert fixed.split("\n\n")[1].startswith("Readiness is 75 and your week was light, so drink to thirst.")
+        say(drift), say("Readiness is solid and your week was light, so drink to thirst.")])
+    assert fixed.split("\n\n")[1].startswith("Readiness is solid and your week was light, so drink to thirst.")
     trimmed = Chat(coach, user, chat_model).send(LONG_RUN_QUESTION, 9, 30, script + [say(drift), say(drift)])
     assert "caffeine" not in trimmed.lower()                                   # only the off-plan sentence goes
-    assert "\n\nReadiness is 75 and your week was light.\nAmounts: GSSI – " in trimmed
+    assert "\n\nReadiness is solid and your week was light.\nAmounts: GSSI – " in trimmed
     assert trimmed.startswith("🏃 Run Sat Oct 10")
 
 
@@ -1935,7 +1949,7 @@ def test_actually_it_was_2_bananas_is_an_edit(coach, user, chat_model):
 
 
 def test_m4_14_more_carbs_next_to_a_no_extra_carbs_plan_is_trimmed(coach, user, chat_model):
-    drift = ("Readiness is 75 and you had a light week, so boost carbs on Friday and stick to a familiar, "
+    drift = ("Readiness is solid and you had a light week, so boost carbs on Friday and stick to a familiar, "
              "easy-to-digest pre-run meal plus your practiced fluid plan on Saturday to top up glycogen [1].")
     reply = Chat(coach, user, chat_model).send(LONG_RUN_QUESTION, 9, 0, [
         call("search_gssi", query="carbs before a long run", k=2), call("fueling_plan", day_text="Saturday"),
@@ -2025,6 +2039,8 @@ def assert_cited_in_own_words(reply: str, seen: dict):
     if seen["plans"]:                                  # no fueling topic the plan lacks (a question is fine)
         statements = " ".join(s for s in re.split(r"(?<=[.!?])\s+", own) if not s.endswith("?"))
         assert topics(statements) <= topics(seen["plans"][-1]["text"]), own
+        words = "\n".join(line for line in own.splitlines() if not line.startswith("Weight saved:"))
+        assert not has_digit(words), own                 # qualitative: the plan has every amount and time
     if re.search(r"\[\d\]", own):                    # G rubric: every [n]-cited claim is supported by passage n
         from tests.conftest import judge_citations
         by_n = {}                                     # every passage of n the coach was given, not just the last

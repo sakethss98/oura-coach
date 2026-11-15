@@ -335,7 +335,7 @@ def save_body_weight(weight: float, unit: Literal["kg", "lb"], state: Messages,
         return as_json({"saved": False, "reason": f"{weight:g} {unit} doesn't look like a body weight"}), {}
     fact = memory.save_body_weight(t.user, kg)
     db.ask_once(t.user.id, _weight_note(kg, SAVED_WEIGHT))         # they just told us: no "(using 62 kg …)" later
-    saved = {"saved": True, "id": fact["id"], "fact": fact["text"]}
+    saved = {"saved": True, "id": fact["id"], "fact": fact["text"], "weight_kg": round(kg, 1)}
     earlier = _last_fueling_args(state)
     if earlier is None:
         return as_json(saved), {}

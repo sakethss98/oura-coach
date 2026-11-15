@@ -202,29 +202,23 @@ ECHO_WORDS = 8          # a sentence sharing 8 words in a row with a tool result
 OFFER_QUESTION = re.compile(r"^\s*(want|would you like|should I|shall I|need|do you want)\b", re.I)
 
 
-NUMBER = re.compile(r"\d+(?:[.,]\d+)*")
 MARKER_TEXT = re.compile(r"\[\d{1,2}\]")
 
 
-def numbers(text: str) -> set[str]:
-    """The numbers in a text, markers left out ("30–60 min [1]" -> {"30", "60"}; "1,200" = "1200", "1.0" = "1")."""
-    found = set()
-    for n in NUMBER.findall(MARKER_TEXT.sub(" ", text)):
-        n = n.replace(",", "")
-        found.add(n.rstrip("0").rstrip(".") if "." in n else n)
-    return found
+def has_digit(text: str) -> bool:
+    """A digit outside citation markers ("readiness 75" yes, "light week [1]" no)."""
+    return bool(re.search(r"\d", MARKER_TEXT.sub(" ", text)))
 
 
-def own_line(text: str, known: str = "") -> str:
-    """The coach's own line next to a code-built plan: at most two sentences, in order, without amounts, a recap
-    of the plan, talk about the plan itself ("follow the plan I sent") or a number that isn't in `known` (the
-    code-built plan and this turn's tool results: "about 30–60 minutes before" next to a plan that says 60 min),
-    clause by clause. A question to them stays ("Is it hot where you run?")."""
-    allowed = numbers(known)
+def own_line(text: str) -> str:
+    """The coach's own line next to a code-built plan: at most two sentences, in order, qualitative only. Clause by
+    clause it loses any number (every amount and time is in the plan; markers like [1] don't count), a recap of
+    the plan, talk about the plan itself ("follow the plan I sent") and offers. A question to them stays ("Is it
+    hot where you run?")."""
     sentences = [s for s in re.split(r"(?<=[.!?]\))\s+|(?<=[.!?])\s+|\n+", text.strip())   # "(… above.) Next"
                  if s and not RECAP.match(s)]
-    kept = [k for k in (without_clauses(s, lambda c: AMOUNT.search(c) or ABOUT_THE_PLAN.search(c)
-                                         or OFFER_QUESTION.match(c) or numbers(c) - allowed) for s in sentences) if k]
+    kept = [k for k in (without_clauses(s, lambda c: has_digit(c) or ABOUT_THE_PLAN.search(c)
+                                         or OFFER_QUESTION.match(c)) for s in sentences) if k]
     return " ".join(kept[:OWN_LINE_SENTENCES])
 
 

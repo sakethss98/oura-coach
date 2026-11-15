@@ -76,6 +76,7 @@ def config(hour=9):
                              "use_fixtures": True}}
 
 
+@needs_fixtures
 def test_two_categories_get_the_union_of_their_tools_and_both_bodies(temp_db):
     tools, guidance, override = agent.turn_setup(turn(config()), ["logging", "training"])
     names = {t.name for t in tools}
@@ -83,6 +84,7 @@ def test_two_categories_get_the_union_of_their_tools_and_both_bodies(temp_db):
     assert [name for name, _ in guidance] == ["logging", "training"] and override is None
 
 
+@needs_fixtures
 def test_other_gets_every_tool_but_knowledge_search_and_every_body(temp_db):
     tools, guidance, _ = agent.turn_setup(turn(config()), ["other"])
     assert {t.name for t in tools} == {t.name for t in agent.all_tools()} - {"search_gssi"}
@@ -138,6 +140,7 @@ def test_a_tool_the_route_doesnt_offer_is_refused_in_scripted_tests(coach, chat_
         coach.handle_text(users.default(), "what do you know about me?", fixtures_now())     # labeled memory
 
 
+@needs_fixtures
 def test_search_gssi_is_offered_only_where_a_skill_lists_it(temp_db):
     listing = sorted(s.name for s in skills.load().values() if "search_gssi" in s.tools)
     assert listing == ["fueling_hydration", "goal_program"]

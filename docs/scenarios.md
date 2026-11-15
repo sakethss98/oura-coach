@@ -13,9 +13,15 @@ and values are adapted to the fixtures; the intent is kept. Tests: `tests/test_r
 - Regression = must pass. Capability = target for a later milestone, marked xfail with the milestone name.
 - Every real failure from Telegram becomes a new scenario, with the date it happened.
 
-### Known flaky (for Part G)
+### Part G eval cases (logged, no runtime guard)
 
-- Scenario 5 (live), the third turn "make it higher protein": about 1 run in 4, the model answers in its own words instead of calling `meal_recipe` (seen 2026-11-10 in the full live pass; 3 of 3 on a rerun). The dish stays the same, but the portions aren't code-built. Part G: score it per run and decide whether the nutrition skill forces `meal_recipe` on a change to the last dish.
+Runtime guards are added only for (a) a wrong fact about their data, (b) safety, (c) a false or missing claim of an action. Every other miss lands here, to be scored per run in Part G.
+
+- **G-1** Scenario 5 (live), the third turn "make it higher protein": about 1 run in 4 the model answers in its own words instead of calling `meal_recipe` (seen 2026-11-10; 3 of 3 on a rerun). The dish stays the same, but the portions aren't code-built. Check: meal_recipe was called with a change.
+- **G-2** M4-12 (live, 2026-11-10): with its numbers cut, the own line came out vague: "Have coffee or an energy drink roughly in that timeframe before a run." Check (judge): the own line says something the plan doesn't, tied to their day.
+- **G-3** M4-11 (live, 2026-11-14, 1 of 3 runs): the coach answered without get_today or workouts, so its line didn't use their readiness or training. Nothing it said about their data was wrong. Check: a day-or-training tool was called.
+- **G-4** M4-12 (live, 2026-11-14, 2 of 3 runs): "lower doses still give benefits with fewer side effects [n]" kept its marker; the judge says the caffeine passages don't state "fewer side effects". It's an over-cite (the citation check keeps about 9% of these by design), not a fact about their data. Check: the judge's citation rubric.
+- **G-5** Scenario 27 (live, 2026-11-14): nothing was saved and it asked for the days, but as an instruction ("Tell me the exact days (e.g., Oct 10–14…)") with no "?", so the test's question-mark check failed. Check (judge): it asks which days.
 
 ## Greeting and replies
 

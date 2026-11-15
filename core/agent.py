@@ -347,6 +347,23 @@ def _turn_facts(turn_messages: list, messages: list) -> reply_rules.TurnFacts:
     return reply_rules.TurnFacts(after_log=logged, carb_load=carb_load)
 
 
+WEIGHT_SAVED = "Weight saved: {kg:g} kg."
+WEIGHT_SAID = re.compile(r"\bsaved\b", re.I)
+
+
+def _saved_weight(turn_messages: list) -> float | None:
+    """The body weight save_body_weight saved this turn, in kg, or None."""
+    for m in turn_messages:
+        if isinstance(m, ToolMessage) and m.name == "save_body_weight":
+            try:
+                result = json.loads(m.content)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(result, dict) and result.get("saved"):
+                return result["weight_kg"]
+    return None
+
+
 def _refused(message: ToolMessage) -> bool:
     """A write tool that refused and changed nothing ({"added": false}, {"saved": false}, {"updated": false})."""
     try:
@@ -395,7 +412,7 @@ def respond(state: AgentState, config) -> dict:
         if fueling:
             text = reply_rules.amounts_from(text, tool_texts)
         if beside_plan:     # the code text has the amounts: its own short line, no recap, no offer
-            text = reply_rules.own_line(citations.mark_urls(text, sources), tool_texts)   # its numbers: the tools'
+            text = reply_rules.own_line(citations.mark_urls(text, sources))   # no numbers: the plan has them
         return text
 
     draft = guarded(draft)
@@ -433,6 +450,10 @@ def respond(state: AgentState, config) -> dict:
             parts.append(guarded(_within_rules(draft, tools_called, t, offered, sources, facts), beside_plan))
     elif draft:
         parts.append(guarded(_within_rules(draft, tools_called, t, offered, sources, facts)))
+    weight = _saved_weight(turn_messages)
+    built = len(dict.fromkeys(verbatim))                  # the code-built parts come first
+    if weight is not None and not state.get("code_reply") and not WEIGHT_SAID.search("\n".join(parts[built:])):
+        parts.insert(built, WEIGHT_SAVED.format(kg=weight))   # a saved weight is always confirmed
     reply = "\n\n".join(p for p in parts if p) or NO_REPLY
     code_sources = list({s["url"]: s for m in turn_messages if isinstance(m, ToolMessage) and isinstance(m.artifact, dict)
                          for s in m.artifact.get("code_sources", [])}.values())
