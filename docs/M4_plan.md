@@ -198,124 +198,227 @@ M3.2 is done and tagged (`m3.2` = 00ed428; CLAUDE.md Status agrees). Live use af
 - `pytest -q tests/test_gssi_retrieval.py`: 5 known questions → the expected URL in the top 4; skipped without an index.
 - Live scenario M4-11: "My long run is Saturday. What should I eat and drink Friday and Saturday?" Checks: health_range / get_today + food_totals + search_gssi + fueling_plan are called, the amounts equal fueling_plan's, and the link is present.
 
-## Part E — Goal programs (half marathon first)
+## Part E — The generic goal engine (amended 2026-11-09, plan approved 2026-11-15)
 
-**New module `modules/goals/`** (registered; added to user 1's enabled_modules by a backup-first data migration). New tables (CREATE IF NOT EXISTS): `goals`, `goal_answers(goal_id, key, value, source user|data, updated_at)`, `program_days(goal_id, date, discipline, session_type, target_km, target_min, phase, week, status planned/done/missed/moved/skipped, done_ref, details_json)`, `program_adjustments(goal_id, day, kind, reason, created_at)`, `direction_goals`, `direction_rules`.
+The 2026-11-08 Part E (half marathon first) was replaced by this plan after the amendment: the coach is for any person with any goal; the half marathon is only the first template.
 
-**Template schema (`programs/schema.py`, pydantic).**
-- Fields: `asks_user`, `phases`, `disciplines[]` (each with `session_types`, `progression`, `weekly` values per week), `shared` (weekly load/hard-day cap, rest budget, max sessions), `milestones`, `progress_signals[]` (`oura_workout`, `manual_workout`, `checkin`, plus declared-only `milestone_test`, `class_attended`, `coach_verdict` for skill goals like a belt), `safety`.
-- `programs/half_marathon.yaml` is wired. `programs/examples/ironman.yaml` (swim/bike/run/strength) validates in a test and isn't wired.
-- The `goal_program` skill and tools speak of "sessions" and "disciplines", never "runs".
+### Context
 
-**E1 Running numbers: proposed from Hal Higdon's Novice 1 Half Marathon (12 weeks), checked today on halhigdon.com, converted to km.**
+Parts 0 through D are done and pushed (`a9f024d`). Part E was planned on 2026-11-08 as "goal programs, half marathon first" (docs/M4_plan.md). The 2026-11-09 amendment changes its shape. The coach is for any person with any goal. The half marathon is only the first template, and your race is only test data. This plan replaces the Part E section of docs/M4_plan.md once approved. Every point of the amendment is mapped to where it lands in the table at the end.
 
-| Wk | Phase | Easy run A | Short run | Easy run B | Long run |
-|---|---|---|---|---|---|
-| 1 | base | 5 | 3 | 5 | 6.5 |
-| 2 | base | 5 | 3 | 5 | 6.5 |
-| 3 | base | 5.5 | 3 | 5.5 | 8 |
-| 4 | base | 5.5 | 3 | 5.5 | 8 |
-| 5 | build | 6.5 | 3 | 6.5 | 9.5 |
-| 6 | build (lighter) | 6.5 | 3 | 6.5 | 5 (Higdon's 5K week) |
-| 7 | build | 7 | 5 | 7 | 11 |
-| 8 | build | 7 | 5 | 7 | 13 |
-| 9 | build (lighter) | 8 | 5 | 8 | 10 (Higdon's 10K week) |
-| 10 | peak | 8 | 5 | 8 | 14.5 |
-| 11 | peak | 8 | 5 | 8 | 16 (longest) |
-| 12 | taper | 6.5 | 5 | 3 | race 21.1 |
+**Decided (2026-11-14):**
+- **Load growth:** each week's load per discipline is at most +25% over the highest of the 3 weeks before, so a lighter week doesn't reset the baseline. The long session is at most +25% over the longest session in the 30 days before; the event itself is exempt. A test checks that a draft growing +35% fails. Higdon's Novice 1 passes as published (largest step +17.6%).
+- **goals.yaml:** the `race`, `primary_goal` and `current` blocks are removed (no code reads them). Your race comes back as goal_answers rows when you set the goal in chat.
 
-- **Rest:** the day before the long run (Jeff Galloway's half-marathon guidance). The long-run day is asked (Sat/Sun).
-- **Entry:** a long run of at least 5 km in the last 4 weeks (Galloway's Finish program asks for 3 mi in the last 2 weeks).
-- **Pace for minutes:** the median of their Oura running workouts (distance/duration); else asked.
-- **Strength defaults:** 2/week in base and build, 1 maintenance at peak, 1 light in the taper. This follows Higdon's note for experienced lifters (lift after runs, cut back at peak). His beginners wait until after the plan; your direction goal is why we don't.
-- **Post-race:** a proposed 6–8-week lifting block with running at maintenance. It's created only on your yes.
-- **Hybrid days:** session type `run_then_strength` = one session with two blocks, run first, reusing the M3.2 blocks (`plan_json.blocks`, per-block done, Oura auto-complete per block). Strength can sit on a run day as a run followed by a lift, which matches Higdon's "lift after runs". Pairing rules, in code:
-  - Only an easy or short run gets a lift; never the long run.
-  - Never Legs on L−1 or L−2 (the existing rule), and never on L+1.
-  - L+1 (the day after the long run) is rest or an easy session only: a walk, mobility, or upper body at most.
-  - Legs go mid-week by preference (L−4 or L−5).
-  - Upper body or core after any harder run (the longer easy run of the week).
-  - The total fits the plan's time window; the existing `_fit_window` cuts the last block.
-- **Race day:** Feb 15, 2027 is a Monday. The generator anchors the last week to the race date: week 12's long-run slot becomes the race on Monday, the Sunday before it (L−1) is rest, and taper runs count back from race day. 14 weeks remain from Mon Nov 9, so the extra weeks repeat the entry week at maintenance (E3).
-- **Lighter weeks:** the race weeks act as a lighter week every 3 weeks.
-- **Progression (decided: Higdon as published):** each long run is held for 2 weeks, then grows ~1.6 km. That's about 10%/week averaged over each pair. The template's progression rule says exactly that: "+≤ 1.6 km after a 2-week hold, at most +25% in one week; a lighter week every 3 weeks; a 1-week taper". The adjustment code (E6) uses the same rule.
+**Facts from the code that shape this plan:**
+- Workouts reach modules with Oura names: `activity.OURA_MATCHES` has running, walking and strengthTraining. Fixtures have exactly running, strengthTraining, walking and yoga.
+- `daily_metrics` keys (readiness_score, sleep_hours, hrv_ms, resting_hr, steps) are already plain. Only the workout `activity` strings are Oura-specific.
+- `fueling.run_minutes` already computes a median pace from recent runs (3–12 min/km). It falls back to a constant 7 min/km, which item 3 rules out for paces.
+- `planner` already takes a request as blocks (`blocks.requested_blocks`), `policy_check` runs per block, and `activity.next_split_day` picks the strength split.
+- `skills/goal_program.md` has your race ("half marathon on Feb 15 under 2:30") and "a hybrid athlete" in its frontmatter.
 
-**E0 Direction goal.**
-- A closed rule catalog, `config/direction_rules.yaml`, gives each key a unit, an allowed range and its enforcer:
-  - `strength_sessions_per_week {min,max}` (generator, all phases)
-  - `min_strength_in_taper` (generator)
-  - `post_race_strength_block_weeks` (generator proposal)
-  - `protein_g_per_kg` (nutrition targets; clamped 1.2–2.2; calories never change)
-  - `max_run_days_per_week` (generator)
-  - `hybrid_days_per_week {min,max}` (generator)
-  - `keep_strength_on_downgrade` (policy_check)
-- Flow:
-  1. `set_direction_goal(text)` → one structured call (prompts/direction_rules.md) proposes 3–6 rules **from the catalog only** (enum keys, so code can enforce every one).
-  2. The proposal goes into `direction_rules` with `confirmed_at = NULL` and is shown as code text.
-  3. `confirm_direction_rules(edits)` takes one round of edits and sets `confirmed_at`.
-- Only confirmed rules are read. A change re-runs propose → confirm.
-- `direction_check(question)` for "hybrid athlete by December?":
-  - The verdict sentence is the model's, from general knowledge, marked approximate.
-  - The 8 weekly milestones are code: each rule's target vs their last 4 weeks (strength sessions/week from merged activity, protein days hit from food_log, longest run from Oura).
-  - Lifts are left out with "no lift log yet", since we don't record weights.
+### Layout
 
-**E2 Questionnaire.**
-- A fixed core (goal + date, current level, days and time per week, injuries/limits) plus the template's `asks_user` (long-run day, easy pace).
-- `create_goal` asks 2 open keys at a time and `answer_goal(fields)` stores them in `goal_answers`.
-- Data overwrites the answer when it exists: longest run in the last 4 weeks and pace from Oura/manual runs.
-- A race goal may carry a **target time** ("under 2:30"), stored as `goal_answers.target_time` (parsed in code to seconds; source user). There are no pace workouts in M4: the plan stays finish-focused.
+```
+programs/                      the goal engine's data contract; no imports from core/ or connectors/
+  schema.py                    pydantic Template (+ Variant, Discipline, SessionType, Week, Placement, Signal)
+  validate.py                  validate_template(t) -> list[str]; validate_plan(days, profile, t) -> list[str]
+  library.py                   load(name), approved(), the source/status gate
+  library/half_marathon.yaml   wired: novice + intermediate variants
+  examples/ironman.yaml        unwired: swim/bike/run/strength
+  examples/day_hike.yaml       unwired: dated long day hike with elevation gain, knee-pain profile in its test
+config/program_safety.yaml     the safety numbers (growth 0.25, long session 0.25 over 30 days, taper, rest), labeled
+config/movements.yaml          closed movement vocabulary + which movements each workout type / session type uses
+modules/goals/                 the module (registered): profile, signals, paces, feasibility, generator, adjust,
+                               direction, tools, messages, module
+```
 
-**E3 Feasibility (pure).** The start week = the last template week whose long run ≤ their longest recent run; the weeks needed = 12 − start + 1. If weeks left < weeks needed, say so and offer the earliest feasible date or a 10K (offered in words; no 10K template). Extra weeks repeat the entry week at maintenance. Nothing is written to `program_days` until they say yes.
-- **Predicted finish (only when a target time is set):** pure `feasibility.predict_finish(runs, race_km)`.
-  - It uses Riegel's formula, T2 = T1 × (D2 / D1)^1.06, on Oura running workouts of ≥ 5 km in the last 6 weeks (`distance` + start/end).
-  - The run with the fastest projection is used.
-  - The result is marked approximate: Oura durations can include pauses, and Riegel assumes trained, evenly paced runs. It's compared with the target in plain words ("about 2:24 predicted, so 2:30 looks within reach").
-  - With no qualifying run: "Not enough run data to predict a time yet. A 5 km or longer run with the ring on would let me."
-  - Unit tests: known Riegel values, no qualifying run, and the fastest projection picked.
+### E1 Template schema and validator (amendment 2, 7)
 
-**E4 Generator (pure: template + answers + confirmed direction rules + start date → days).**
-- It places runs on the training days, avoiding back-to-back run days where it can.
-- Strength goes on non-run days per the phase and direction rules.
-- Rest on L−1, plus the rest budget (`goals.yaml schedule.rest_days_per_week`; see assumptions).
-- Long run = the only hard day; ≤ max sessions/week.
-- A strength day that would be Legs on L−1 or L−2 takes the next split (the existing `next_split_day` and split list).
-- Hybrid days: up to `hybrid_days_per_week.max` strength sessions move onto easy/short run days (≥ `min`). When hybrid days allow it, the generator frees at least one full rest day per week beyond L−1. Example week with a Sunday long run:
-  - Mon: rest (L+1)
-  - Tue: easy run + upper
-  - Wed: strength (Legs allowed, L−4)
-  - Thu: short run
-  - Fri: easy run (+ core, L−2: no Legs)
-  - Sat: rest (L−1)
-  - Sun: long run
-- Unit tests:
-  - 2 strength days in every build week
-  - no Legs the day before a long run (or on L−2), and none on L+1
-  - L+1 is only rest, a walk, mobility or upper body
-  - Legs land on L−4/L−5 when those days are training days
-  - ≥ 1 rest day/week
+- **`programs/schema.py`**
+  - Top-level fields: `name, title, source: library|drafted, status: approved|pending_review, event` (optional: dated, distance or other measure), `matches` (the goal words that pick it), `asks_user`, `variants`, `disciplines`, `shared`, `placement`, `progress_signals`, `safety`.
+  - A discipline has `measure` (km | min | elevation_m), `session_types` and `alternatives`.
+  - A session type has `intensity`, `hard`, `movements` (from config/movements.yaml), `pace` (easy | race | none) and `default_min`.
+  - A variant has `choose_when` (declarative thresholds on profile and data) and `weeks`. A week has `phase`, `lighter` and `sessions: [{discipline, type, amount}]`.
+- **`validate_template(t)`** checks structure: known disciplines, types and movements, and phases in order. Safety checks, per discipline and per variant:
+  - weekly load ≤ 1.25 × the highest of the 3 weeks before
+  - long session ≤ 1.25 × the longest in the 30 days before (the event is exempt)
+  - every week leaves at least one rest day: sessions per week ≤ 7 − `shared.min_rest_days`, and ≤ `shared.max_sessions_per_week`
+  - hard sessions per week ≤ `shared.max_hard_per_week`
+  - a dated event has ≥ `safety.taper_weeks` weeks, and the week before the event is ≤ 75% of the peak week (our number, labeled `ours:` in config/program_safety.yaml)
+  - every placement rule names a session type that exists
+- **`validate_plan(days, profile, t)`** runs on the generated days before anything is written:
+  - the same growth checks, now including their real last 30 days and 3 weeks from signals
+  - ≥ 1 rest day in every calendar week
+  - sessions per week ≤ their `days_per_week`
+  - each session fits their time: minutes ≤ `minutes_per_session`, the long day ≤ `longest_session_min`; km becomes minutes at their easy pace
+  - injury limits: no session whose movements meet a limit's `avoid`, and no intensity above a limit's cap
+  - the taper
+- **Source/status gate (`library.py`):** `generate()` refuses any template whose status isn't `approved`. A drafted template must pass `validate_template` and then be approved before it can generate. M5's AI drafts plug in here: a `drafted` + `pending_review` template is stored, validated, and shown for review.
+- **Tests (`tests/test_program_validate.py`), each a deliberately bad template:**
+  - a +35% week
+  - a long session +40% over 30 days
+  - 7 sessions in a week (no rest)
+  - too many hard days
+  - a dated event with no taper
+  - an unknown movement
+  - a placement on a missing type
+- Plan-level tests: a session longer than their time, and a run for a profile that must avoid running impact. Every library and example template passes. A `pending_review` template refuses to generate.
+
+### E2 Templates (amendment 3, 6)
+
+- **`half_marathon.yaml`, novice:** Higdon Novice 1 converted to km, the table approved in the earlier plan (long run 6.5 → 16, race in week 12). Rest the day before the long run. Entry needs a long run ≥ 5 km in the last 4 weeks.
+- **`half_marathon.yaml`, intermediate:** Higdon Intermediate 1 half (12 weeks, with race-pace runs). I'll check it on halhigdon.com at build time, convert it to km, and show you the table before wiring, the same way as Novice.
+  - It's chosen when the data (or, without data, their answers) shows a long session ≥ 10 km in the last 30 days and ≥ 4 days per week. The thresholds live in the template's `choose_when`; data beats answers.
+- **Target time is optional.** No pace is ever a constant:
+  - Easy pace = the median of their recent runs (shared `modules/goals/paces.py`, moved out of `fueling.run_minutes`).
+  - Race pace = target time ÷ distance, or, with no target, the Riegel prediction from their best qualifying run (≥ 5 km, last 6 weeks), marked approximate.
+  - With no runs and no target, the template's `asks_user` adds `easy_pace`.
+  - `fueling.run_minutes` loses its 7 min/km fallback: with a distance and no pace it uses the asked pace, or else says it doesn't know their pace.
+- **Hybrid days and strength placement are template data, not code:** `run_then_strength` is a session type with two blocks, and `placement` rules say "Legs not within 2 days before or 1 day after the long session", "lifts only after easy or short runs", "upper or core after the harder easy run", "Legs mid-week by preference". The generator applies placement rules generically, so the Ironman and hike templates use the same mechanism.
+- **`examples/ironman.yaml`** (swim/bike/run/strength) and **`examples/day_hike.yaml`** (unwired, no `matches`) validate in tests.
+  - day_hike: disciplines hike (measure elevation_m and min), strength (step-ups, glute work), mobility; a dated event; a taper.
+  - Its test also generates a plan for a profile with a knee limit (avoid deep_knee_bend and jumping, cap 3), and `validate_plan` passes. That proves the schema and generator aren't running-shaped.
+  - Example numbers are illustrative and say so in the file.
+
+### E3 Profile: questionnaire, limits, source-neutral signals (amendment 4, 5, 8)
+
+- **Questionnaire core (goal-agnostic, `modules/goals/profile.py`):**
+  - `goal_text` (their words), `event_date` (optional), `level` (new | some | regular, then checked against data)
+  - `days_per_week`, `minutes_per_session`, `longest_session_min`
+  - `limits` (below), `equipment` (none | home | gym), `gym_access`
+- The template's `asks_user` adds the rest (half: `long_session_day`, `target_time` optional, `easy_pace` only without run data).
+- Stored in `goal_answers(goal_id, key, value, source user|data)`. Data overwrites an answer when it exists: longest session, pace, sessions per week.
+- `create_goal` / `answer_goal` ask at most 2 open keys at a time, as code-built text.
+- **Limits are structured:** new table `limits(user_id, body_area, kind pain|injury|condition, avoid JSON, intensity_cap, start_date, end_date, note)`.
+  - `avoid` comes from the closed vocabulary in config/movements.yaml: running_impact, jumping, deep_knee_bend, downhill, overhead, spinal_load, grip, rotation, swimming_shoulder.
+  - New tool `save_limit(body_area, kind, avoid, intensity_cap, start_text, end_text)`: the model picks enum values, code resolves the dates and stores them. Offered in pain_injury and goal_program.
+  - Read by the generator (sessions are swapped to a template `alternative`, or else rest) and by `policy_check`.
+  - New policy rule `limit`, after `context_cap`: a block whose type's movements meet `avoid` becomes walk or mobility, or the template alternative. A non-body rule, so it feeds the consult question.
+- **Source-neutral signals (`modules/goals/signals.py`)** are the only door from device data into the engine:
+  - `DaySignals(day, sleep_hours, hrv_ms, resting_hr, steps, readiness | None, workouts=[{kind, start, end, minutes, distance_km, source}])`.
+  - Workout `kind` is neutral: run | walk | strength | cycle | swim | hike | hiit | mobility | yoga | other.
+  - The Oura connector maps its observed names (running, walking, strengthTraining, yoga; anything else → other) in one table in `connectors/oura.py`, and `connectors/base.py` documents `kind` in the HealthSource contract. Manual workouts map their workout_type.
+  - Readiness is optional: with none, the existing `baseline.readiness_band` already falls back to HRV, resting HR, sleep and the check-in.
+  - Tests:
+    - the engine runs on a no-wearable source (manual workouts only, every metric None)
+    - the engine runs on a fake second-device dict
+    - a grep test: modules/goals/ and programs/ never mention oura, running, walking, strengthTraining or readiness_score
+
+### E4 Feasibility (pure)
+
+- Entry week = the last variant week whose long session ≤ 1.25 × their longest in the last 30 days and whose load ≤ 1.25 × their highest week of the last 3. That's the validator's own rule, so a plan that starts there passes it.
+- Weeks needed vs weeks left until the event. Infeasible → the earliest feasible date, or a shorter goal offered in words.
+- Extra weeks repeat the entry week at maintenance.
+- **Predicted finish (Riegel)** only with a target time, compared in plain words, marked approximate. With no qualifying run: "Not enough run data to predict a time yet."
+- Unit tests: known Riegel values, no qualifying run, the fastest projection picked.
+- Nothing is written to program_days until they confirm.
+
+### E5 Generator (pure; template + profile + confirmed direction rules + start → days)
+
+- It places sessions on their available days, long session on their long day, by the template's `placement` rules and the direction rules (strength sessions per week, hybrid days).
+- Strength split via `activity.next_split_day`, skipping a split a placement rule forbids that day.
+- It applies limits, then `validate_plan`; any error → nothing is written and the error is reported.
+- The dated event anchors the last week (counting back from the event day).
+- Unit tests (the earlier E4 list carries over):
+  - 2 strength days in build weeks
+  - no Legs on L−1, L−2 or L+1
+  - L+1 light only
+  - Legs at L−4 or L−5
+  - ≥ 1 rest day a week
   - the long-run sequence equals the table
-  - no `run_then_strength` on the long-run day
-  - a hybrid lift after the harder easy run is upper or core
-  - an extra rest day is freed when hybrid days allow
-  - the race lands on Monday Feb 15 with Sunday rest
+  - no lift on the long day
+  - the extra rest day freed by hybrid days
+  - the race on the event day with rest the day before
+  - the same suite on the novice variant, the intermediate variant and the hike example
 
-**E5 Tools.**
-- `create_goal`, `answer_goal`, `goal_today` ("what's today's session?"), `goal_status` (done vs planned to date, long-run progress vs plan, weeks left).
-- Done paths: `today.sync_oura_completions`, `mark_done` and `add_manual_workout` call `goals.sync_done(user, day)`, which matches merged activity to the day's program session (run types ↔ running/manual run with ≥ 70% of target km or min; strength ↔ strength).
-- `start_checkin`, `plan_workout` and `submit_checkin` use today's program session as the request when they named none, so a low-readiness day still gets the consult-once question. A `run_then_strength` day becomes a two-block request.
-- An ad-hoc "give me a run followed by weights" at check-in keeps working as today. On a program day, the run block's type and minutes come from that day's session, the strength block from their request, and code picks the split (no Legs on L−1/L−2).
+### E6 Module, tables, tools, wiring
 
-**E6 Adjustments (pure `adjust.py`, run from `ingest` like `finalize_quietly`, recorded with reasons).**
-- Past planned days with nothing matched → missed.
-- Missed easy run → dropped (never two runs on one day).
-- Missed long run → the next free weekend day before the next long run, else next week's long run is held (no progression).
-- 2+ misses in a week → that week repeats.
-- Low readiness on a program day → the planner's normal downgrade, and the program day is marked `moved`/easy.
-- An active fact with `intensity_cap` → program days in its range are `skipped` (paused), and the plan resumes the same week number afterwards.
+- **`modules/goals/` registered.** It's added to user 1's enabled_modules by a backup-first step in `_m4_steps`.
+- **New tables** (CREATE IF NOT EXISTS): goals, goal_answers, program_days, program_adjustments, direction_goals, direction_rules, limits.
+- **Tools:** create_goal, answer_goal, confirm_goal, goal_today, goal_status, save_limit, set_direction_goal, confirm_direction_rules, direction_check. Texts are code-built and sent as built; results carry facts only (the existing rule).
+- **Done sync:** `goals.sync_done(user, day)` runs from `today.sync_oura_completions`, `mark_done` and `add_manual_workout`. It matches by neutral `kind` and ≥ 70% of target.
+- **Program day as the request:** `start_checkin`, `plan_workout` and `submit_checkin` use today's program session when they named none, through the existing blocks/consult path. An ad-hoc request on a program day keeps the program's run block.
+- **Skills:**
+  - goal_program gets the new tools; its examples become generic ("I want to run a 10k in the spring, can I?", "Can I do a long hike in May with my knee?"). The race text stays only in tests/data/classifier_set.jsonl.
+  - pain_injury gets save_limit.
+  - The honesty line "Program plans aren't set up yet" goes.
 
-**Guilt rule, narrowed (added 2026-11-08, do in Part E):** the code GUILT rule (`core/reply_rules.py`) catches only blame aimed at the person: "you failed", "you should have", "lazy", "slacking". "Missed" and "behind" are allowed when they describe a session or a number ("Moved the long run you missed to Saturday.", "10 g behind on protein"), because adjustment messages need them. Tests: that sentence passes; "You failed to log dinner." and "You should have slept more." still fail.
+### E7 Adjustments and direction goals
 
-**Scenarios E (scripted + live):** E-1 feasible date, E-2 infeasible date, E-3 "what's today's run", E-4 missed long run, E-5 two misses in a week, E-6 "am I on track", E-7 direction goal → rules → confirmed fields, E-8 two strength days in build, E-9 no heavy legs before a long run, E-10 "hybrid athlete by December?" (honest no + milestones; muscle-gain honesty rule), E-11 a hybrid day (easy run then upper body) in a build week, E-12 an ad-hoc run + lift on a program day uses that day's run, E-13 "I want to run a half marathon on Feb 15 under 2:30, can I?" → the distance feasibility plus a predicted time vs 2:30, honest either way (scripted with and without a ≥ 5 km run). The scripted race date is Feb 15, 2027.
+- **Adjustments (pure `adjust.py`, run from ingest like `finalize_quietly`, each saved with its reason):**
+  - missed easy session → dropped
+  - missed long session → the next free day before the next long one, else the next one is held
+  - 2+ misses in a week → the week repeats
+  - low readiness, or a weak band from the neutral inputs → the planner's downgrade, and the day is marked moved
+  - an active fact with `intensity_cap`, or a limit → days in its range skipped or swapped; the plan resumes the same week
+- **Direction goals:** as approved in the earlier plan (closed rule catalog config/direction_rules.yaml, propose → confirm, only confirmed rules read, `direction_check` with code milestones and "no lift log yet"). The catalog keys are generic; "hybrid athlete" appears only in tests.
+
+### No personal values in code (amendment 1)
+
+- `tests/test_no_personal_values.py` scans every tracked file outside tests/ and docs/: .py, .yaml and .md under core/, modules/, connectors/, channels/, programs/, skills/, prompts/, config/ and scripts/, plus root *.py and goals.yaml. Patterns:
+  - `2027-02-15`, `Feb(ruary)? 15`, `\b2:30\b`, `2:29`, `1:59:59`
+  - `hybrid athlete`, `abs by`
+- It fails today on skills/goal_program.md and goals.yaml; both are fixed in E (goals.yaml blocks removed, as you approved).
+- Your race lives in tests (Feb 15, 2027, under 2:30, the hybrid direction goal) and in your goal_answers rows once you set it in chat.
+
+### Scenarios
+
+- E-1..E-13 from the earlier plan carry over (race data in tests only).
+- New:
+  - **E-14:** a user with knee pain saves a limit, and the next plan has no running impact (policy rule `limit`).
+  - **E-15:** a no-wearable user (manual workouts only) creates a goal and gets a plan.
+  - **E-16:** a +35% drafted template is refused (scripted only).
+- E-1..E-15 get scripted + live tests in COVERAGE, as before.
+
+### Pauses and verification
+
+**Pause E-a (engine, pure, no LLM):** schema, validator, library gate, both half variants, both examples, signals, paces, feasibility, generator, adjust, the personal-values test.
+```
+pytest -q tests/test_program_validate.py tests/test_generator.py tests/test_feasibility.py tests/test_adjust.py tests/test_signals.py tests/test_no_personal_values.py
+pytest -q
+```
+I'll show you the intermediate table and the example templates here.
+
+**Pause E-b (wiring + live):** module, tables + migration (backup first), tools, limits in policy, done sync, program day as request, skills, direction goals, scenarios.
+```
+pytest -q
+RUN_LIVE_LLM=1 pytest -q -s tests/test_replay.py -k "live_e"
+python scripts/eval_classifier.py
+python bot.py --fixtures      # "I want to run a half marathon in February", "what's today's session?", "am I on track?"
+```
+Then CLAUDE.md (Decisions, Status, guard policy unchanged) and push.
+
+### Review changes (approved 2026-11-15)
+
+1. The grep test for device names (oura, running, walking, strengthTraining, readiness_score) scans only the .py files in modules/goals/ and programs/. Template YAML text is not scanned.
+2. `save_limit` is an action. Code confirms what was saved in plain words: "Saved: no running impact for your knee until you tell me it's better." A test covers the model claiming a limit was saved when the tool didn't run (bucket c): `reply_rules.CLAIMS` gets the limit wording. (E-b)
+3. GUILT reply rule: narrowed to blame aimed at the person. "Missed" and "behind" are allowed about sessions and numbers. Test: "Moved the long run you missed to Saturday." passes. (E-b)
+4. Intermediate table: if halhigdon.com can't be reached from this session, stop and ask for the table to be pasted. Never reconstruct it from memory.
+5. Assumptions 1–5 stand.
+
+Order: build E-a first, then pause with its verify commands.
+
+### How each amendment point lands
+
+| # | Amendment point | Where |
+|---|---|---|
+| 1 | No personal values in code; a failing test | test_no_personal_values.py; goals.yaml blocks removed; goal_program examples made generic; race only in tests and goal_answers |
+| 2 | Schema + validator module; safety checks; every template passes; bad-template tests | programs/schema.py, programs/validate.py (validate_template + validate_plan), config/program_safety.yaml; E1 tests |
+| 3 | Level variants; target optional; paces from target + recent runs (Riegel) | half_marathon.yaml variants + choose_when; modules/goals/paces.py; fueling's 7 min/km constant removed |
+| 4 | Goal-agnostic questionnaire core + template asks_user | modules/goals/profile.py core keys; template asks_user |
+| 5 | Limits as structured fields read by the generator and policy_check | `limits` table, save_limit tool, config/movements.yaml, policy rule `limit`, generator swaps |
+| 6 | Keep Ironman; add an unwired non-running dated example (knee pain) | programs/examples/ironman.yaml, day_hike.yaml + a generate-and-validate test with a knee limit |
+| 7 | source + status; only approved templates generate | schema fields, library.py gate, pending_review refusal test |
+| 8 | Source-neutral progress and readiness inputs | modules/goals/signals.py (DaySignals, neutral workout kind), Oura name map in the connector, no-wearable + second-device tests, grep test |
+
+### Assumptions (tell me if any is wrong)
+
+1. The long-session check uses the same 25% as weekly load (you named the comparison, not the cap).
+2. The taper threshold (week before the event ≤ 75% of the peak) is ours and labeled `ours:`.
+3. Intermediate variant thresholds (≥ 10 km long session in 30 days, ≥ 4 days a week) are ours, in the template's `choose_when`.
+4. The day-hike numbers are illustrative (an unwired example), not coaching advice.
+5. Training's existing Oura matching (`activity.OURA_MATCHES`) stays as is. Only the goal engine reads neutral `kind`, and moving training onto `kind` waits for M6's adapters.
 
 ## Part F — USDA FoodData Central
 

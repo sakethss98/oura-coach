@@ -1,0 +1,123 @@
+# Example only: the last 8 weeks before an Ironman, to show the schema fits a multi-discipline goal.
+# Illustrative numbers, not coaching advice. Never offered to anyone (no `matches`); it must still pass
+# programs/validate.py like every template.
+# Offsets (`at`) count from the week's anchor day (0), here the long ride.
+
+name: ironman
+title: Ironman (example)
+source: library
+status: approved
+note: "Example only: illustrative numbers, not coaching advice."
+event: {dated: true, measure: min, amount: 780, taper_weeks: 2}
+asks_user: [long_session_day]
+
+disciplines:
+  swim:
+    measure: min
+    kinds: [swim]
+    session_types:
+      easy: {intensity: 2, movements: [swimming_shoulder]}
+      long: {intensity: 3, long: true, movements: [swimming_shoulder]}
+  bike:
+    measure: min
+    kinds: [cycle]
+    session_types:
+      easy: {intensity: 2}
+      long: {intensity: 4, hard: true, long: true}
+  run:
+    measure: km
+    kinds: [run]
+    session_types:
+      easy: {intensity: 3, pace: easy, movements: [running_impact]}
+      long: {intensity: 4, hard: true, long: true, pace: easy, movements: [running_impact]}
+    alternatives: {easy: bike.easy}
+  race:
+    measure: min
+    kinds: [other]
+    session_types:
+      ironman: {intensity: 5, hard: true, event: true, movements: [swimming_shoulder, running_impact]}
+  strength:
+    measure: min
+    kinds: [strength]
+    session_types:
+      general: {intensity: 2, default_min: 30, movements: [spinal_load]}
+
+shared:
+  max_sessions_per_week: 6
+  max_hard_per_week: 2
+  min_rest_days: 1
+  drop_order: [swim.easy, bike.easy]
+  strength_per_week: {build: 1, peak: 1, taper: 0}
+  strength_types: [strength.general]
+
+placement:
+  - {kind: pair_only_after, session: strength, with: [swim.easy, bike.easy]}
+  - {kind: keep_away_from_long, session: strength.general, before: 2, after: 1}
+
+variants:
+  standard:
+    source: illustrative example (not from a published plan)
+    weeks:
+      - phase: build
+        sessions:
+          - {discipline: swim, type: easy, amount: 45, at: -5}
+          - {discipline: bike, type: easy, amount: 60, at: -4}
+          - {discipline: run, type: easy, amount: 8, at: -3}
+          - {discipline: swim, type: long, amount: 50, at: -2}
+          - {discipline: run, type: long, amount: 16, at: -1}
+          - {discipline: bike, type: long, amount: 180, at: 0}
+      - phase: build
+        sessions:
+          - {discipline: swim, type: easy, amount: 50, at: -5}
+          - {discipline: bike, type: easy, amount: 70, at: -4}
+          - {discipline: run, type: easy, amount: 9, at: -3}
+          - {discipline: swim, type: long, amount: 55, at: -2}
+          - {discipline: run, type: long, amount: 18, at: -1}
+          - {discipline: bike, type: long, amount: 210, at: 0}
+      - phase: build
+        sessions:
+          - {discipline: swim, type: easy, amount: 55, at: -5}
+          - {discipline: bike, type: easy, amount: 75, at: -4}
+          - {discipline: run, type: easy, amount: 10, at: -3}
+          - {discipline: swim, type: long, amount: 60, at: -2}
+          - {discipline: run, type: long, amount: 20, at: -1}
+          - {discipline: bike, type: long, amount: 240, at: 0}
+      - phase: build
+        lighter: true
+        sessions:
+          - {discipline: swim, type: easy, amount: 40, at: -5}
+          - {discipline: bike, type: easy, amount: 60, at: -4}
+          - {discipline: run, type: easy, amount: 8, at: -3}
+          - {discipline: swim, type: long, amount: 45, at: -2}
+          - {discipline: run, type: long, amount: 14, at: -1}
+          - {discipline: bike, type: long, amount: 150, at: 0}
+      - phase: build
+        sessions:
+          - {discipline: swim, type: easy, amount: 60, at: -5}
+          - {discipline: bike, type: easy, amount: 80, at: -4}
+          - {discipline: run, type: easy, amount: 10, at: -3}
+          - {discipline: swim, type: long, amount: 65, at: -2}
+          - {discipline: run, type: long, amount: 22, at: -1}
+          - {discipline: bike, type: long, amount: 270, at: 0}
+      - phase: peak
+        sessions:
+          - {discipline: swim, type: easy, amount: 60, at: -5}
+          - {discipline: bike, type: easy, amount: 90, at: -4}
+          - {discipline: run, type: easy, amount: 11, at: -3}
+          - {discipline: swim, type: long, amount: 70, at: -2}
+          - {discipline: run, type: long, amount: 24, at: -1}
+          - {discipline: bike, type: long, amount: 300, at: 0}
+      - phase: taper
+        sessions:
+          - {discipline: swim, type: easy, amount: 45, at: -5}
+          - {discipline: bike, type: easy, amount: 60, at: -4}
+          - {discipline: run, type: easy, amount: 8, at: -3}
+          - {discipline: swim, type: long, amount: 50, at: -2}
+          - {discipline: run, type: long, amount: 14, at: -1}
+          - {discipline: bike, type: long, amount: 180, at: 0}
+      - phase: taper
+        sessions:
+          - {discipline: swim, type: easy, amount: 30, at: -5}
+          - {discipline: bike, type: easy, amount: 45, at: -4}
+          - {discipline: run, type: easy, amount: 5, at: -3}
+          - {discipline: race, type: ironman, amount: 780, at: 0}

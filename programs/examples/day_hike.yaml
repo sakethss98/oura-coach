@@ -1,0 +1,97 @@
+# Example only: getting ready for one long day hike with a big climb (here 1,200 m of elevation gain), to show the
+# schema isn't running-shaped. Its load is elevation, not km. Illustrative numbers, not coaching advice. Never
+# offered to anyone (no `matches`); it must still pass programs/validate.py like every template.
+# tests/test_generator.py makes a plan from it for someone with knee pain (no deep knee bends or jumping, effort
+# at most 3): the lower-body strength sessions become the knee-friendly ones.
+# Offsets (`at`) count from the week's anchor day (0), the long hike.
+
+name: day_hike
+title: Long day hike (example)
+source: library
+status: approved
+note: "Example only: illustrative numbers, not coaching advice."
+event: {dated: true, measure: elevation_m, amount: 1200, taper_weeks: 1}
+asks_user: [long_session_day]
+
+disciplines:
+  hike:
+    measure: elevation_m
+    kinds: [hike, walk]
+    session_types:
+      hill_walk: {intensity: 2, movements: [downhill]}
+      long_hike: {intensity: 3, long: true, movements: [downhill]}
+      summit: {intensity: 3, event: true, movements: [downhill]}
+  strength:
+    measure: min
+    kinds: [strength]
+    session_types:
+      lower: {intensity: 3, default_min: 35, movements: [deep_knee_bend, spinal_load]}
+      knee_friendly: {intensity: 2, default_min: 30}         # step-ups to a low box, glute bridges, calf raises
+    alternatives: {lower: strength.knee_friendly}
+  mobility:
+    measure: min
+    kinds: [mobility, yoga]
+    session_types:
+      mobility: {intensity: 1, recovery: true}
+
+shared:
+  max_sessions_per_week: 5
+  max_hard_per_week: 1
+  min_rest_days: 1
+  drop_order: [mobility.mobility]
+  strength_per_week: {base: 2, build: 2, taper: 1}
+  strength_types: [strength.lower, strength.knee_friendly]
+
+placement:
+  - {kind: rest_before_long, days: 1}
+  - {kind: light_after_long, days: 1}
+  - {kind: keep_away_from_long, session: strength.lower, before: 2, after: 1}
+  - {kind: keep_away_from_event, session: strength.lower, days: 7}
+  - {kind: pair_only_after, session: strength, with: [mobility.mobility]}
+  - {kind: prefer_days_before_long, session: strength.lower, offsets: [-4, -5]}
+
+variants:
+  standard:
+    source: illustrative example (not from a published plan)
+    weeks:
+      - phase: base
+        sessions:
+          - {discipline: hike, type: hill_walk, amount: 150, minutes: 60, at: -4}
+          - {discipline: mobility, type: mobility, amount: 20, at: -2}
+          - {discipline: hike, type: long_hike, amount: 300, minutes: 120, at: 0}
+      - phase: base
+        sessions:
+          - {discipline: hike, type: hill_walk, amount: 150, minutes: 60, at: -4}
+          - {discipline: mobility, type: mobility, amount: 20, at: -2}
+          - {discipline: hike, type: long_hike, amount: 350, minutes: 140, at: 0}
+      - phase: base
+        sessions:
+          - {discipline: hike, type: hill_walk, amount: 200, minutes: 70, at: -4}
+          - {discipline: mobility, type: mobility, amount: 20, at: -2}
+          - {discipline: hike, type: long_hike, amount: 420, minutes: 160, at: 0}
+      - phase: base
+        lighter: true
+        sessions:
+          - {discipline: hike, type: hill_walk, amount: 150, minutes: 60, at: -4}
+          - {discipline: mobility, type: mobility, amount: 20, at: -2}
+          - {discipline: hike, type: long_hike, amount: 350, minutes: 140, at: 0}
+      - phase: build
+        sessions:
+          - {discipline: hike, type: hill_walk, amount: 200, minutes: 70, at: -4}
+          - {discipline: mobility, type: mobility, amount: 25, at: -2}
+          - {discipline: hike, type: long_hike, amount: 500, minutes: 180, at: 0}
+      - phase: build
+        sessions:
+          - {discipline: hike, type: hill_walk, amount: 250, minutes: 80, at: -4}
+          - {discipline: mobility, type: mobility, amount: 25, at: -2}
+          - {discipline: hike, type: long_hike, amount: 600, minutes: 210, at: 0}
+      - phase: build
+        sessions:
+          - {discipline: hike, type: hill_walk, amount: 250, minutes: 80, at: -4}
+          - {discipline: mobility, type: mobility, amount: 25, at: -2}
+          - {discipline: hike, type: long_hike, amount: 720, minutes: 240, at: 0}
+      - phase: taper
+        sessions:
+          - {discipline: hike, type: hill_walk, amount: 150, minutes: 60, at: -4}
+          - {discipline: mobility, type: mobility, amount: 20, at: -2}
+          - {discipline: hike, type: summit, amount: 1200, minutes: 420, at: 0}

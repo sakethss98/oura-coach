@@ -9,6 +9,19 @@ from connectors.manual import ManualSource
 from connectors.oura import HISTORY_DAYS, OuraSource, body_metrics, daily_metrics
 
 
+def neutral_day(day: date, metrics: dict | None, manual: list[dict]) -> dict:
+    """One day in the neutral shape (connectors/base.NEUTRAL_DAY_KEYS) from a device's daily metrics (None = no
+    wearable) and the workouts they added in chat."""
+    m = metrics or {}
+    workouts = [{"kind": w["kind"], "start": w["start"], "end": w["end"], "minutes": w["minutes"],
+                 "distance_km": w.get("distance_km"), "source": "device"} for w in m.get("workouts") or []]
+    workouts += [{"kind": w["kind"], "start": w["start"], "end": w["end"], "minutes": w["minutes"],
+                  "distance_km": w.get("distance_km"), "source": "manual"} for w in manual]
+    return {"day": day.isoformat(), "readiness": m.get("readiness_score"), "sleep_hours": m.get("sleep_hours"),
+            "hrv_ms": m.get("hrv_ms"), "resting_hr": m.get("resting_hr"), "steps": m.get("steps"),
+            "workouts": workouts}
+
+
 class Health:
     def __init__(self, use_fixtures: bool = False, pinned: dict | None = None):
         self.oura = OuraSource(use_fixtures, pinned)
@@ -38,6 +51,12 @@ class Health:
         raw = self.oura.history(user, start, end, now)
         days = [start + timedelta(days=i) for i in range((end - start).days + 1)]
         return {d.isoformat(): daily_metrics(raw, d, user.tz) for d in days}
+
+    def signals(self, user, start: date, end: date, now: datetime | None = None) -> dict[str, dict]:
+        """{YYYY-MM-DD: the neutral day} for start..end: what the goal engine reads (modules/goals/signals.py)."""
+        metrics = self.history(user, start, end, now)
+        manual = self.manual_by_day(user, start, end)
+        return {d: neutral_day(date.fromisoformat(d), metrics.get(d), manual.get(d, [])) for d in metrics}
 
     def manual_by_day(self, user, start: date, end: date) -> dict[str, list[dict]]:
         days = [start + timedelta(days=i) for i in range((end - start).days + 1)]

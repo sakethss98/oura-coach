@@ -10,20 +10,17 @@ a stored weight say so once: "(using 70 kg from your Oura profile; tell me if th
 """
 from datetime import date, timedelta
 from functools import lru_cache
-from statistics import median
 
 import yaml
 
 from core.config import ROOT
+from modules.goals.paces import easy_pace
 
 RULES_PATH = ROOT / "config" / "fueling.yaml"
 PARTS = ("day_before", "before", "during", "fluids", "caffeine", "after")
 DEFAULT_PARTS = ("day_before", "before", "during", "fluids", "after")
 DURATION_PARTS = {"day_before", "during", "fluids"}     # parts whose amounts depend on how long the run is
 TYPICAL_LONG_RUN_MIN = 75                               # blocks.DEFAULT_MINUTES["long_run"]
-# A run's pace is used only inside this range (min per km): a GPS-less "running" record of 2 km in 37 min
-# would make a 10k take almost 3 hours.
-PLAUSIBLE_PACE = (3, 12)
 LONG_RUN_MIN = 60
 SODIUM_MG_PER_MMOL = 23
 RECENT_DAYS = 7
@@ -63,10 +60,8 @@ def run_minutes(said_minutes: float | None, distance_km: float | None, recent_ru
     Their words first; a distance at their usual pace; else their longest recent run; else a typical long run."""
     if said_minutes:
         return round(said_minutes), "as you said"
-    paces = [p for p in (r["minutes"] / r["distance_km"] for r in recent_runs if r.get("distance_km"))
-             if PLAUSIBLE_PACE[0] <= p <= PLAUSIBLE_PACE[1]]
-    if distance_km and paces:
-        pace = median(paces)
+    pace = easy_pace(recent_runs)
+    if distance_km and pace:
         seconds = round(pace * 60)
         return round(distance_km * pace), f"{distance_km:g} km at your usual {seconds // 60}:{seconds % 60:02d} per km"
     if distance_km:

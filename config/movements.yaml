@@ -1,0 +1,13 @@
+# The closed movement vocabulary. A limit says which of these to avoid ("no running impact for my knee"),
+# a template's session types say which they use, and code matches the two (programs/validate.py, the goal
+# generator; policy_check from Part E-b). A name not in this list is an error.
+movements:
+  running_impact: running, or anything with the same pounding (jogging, the run part of a brick)
+  jumping: jumps, hops, skipping, plyometrics
+  deep_knee_bend: squats, lunges, pistol work, deep step-downs
+  downhill: long or steep descents (hiking, trail running)
+  overhead: pressing or holding weight overhead
+  spinal_load: a heavy load on the spine (deadlifts, back squats, heavy carries)
+  grip: hard gripping or hanging (pull-ups, heavy rows, farmer's carries)
+  rotation: loaded twisting (throws, swings, rotational core work)
+  swimming_shoulder: repeated overhead arm strokes (freestyle, butterfly)

@@ -9,6 +9,11 @@ from core import db
 from core.day import day_bounds
 
 
+# The workout types people add in chat (modules/training/schemas.DoneType) -> the neutral workout kind.
+MANUAL_KINDS = {"easy_run": "run", "long_run": "run", "HIIT": "hiit", "strength": "strength", "walk": "walk",
+                "mobility": "mobility", "yoga": "yoga", "other": "other"}
+
+
 class ManualSource:
     def add_workout(self, user, workout_type: str, start: datetime, end: datetime, minutes: int | None,
                     feeling: str | None = None, plan_id: int | None = None) -> dict:
@@ -18,6 +23,7 @@ class ManualSource:
         start, end = day_bounds(user, day)
         return [
             {"source": "manual", "id": w["id"], "workout_type": w["workout_type"],
+             "kind": MANUAL_KINDS.get(w["workout_type"], "other"),
              "start": w["start"], "end": w["end"], "minutes": w["minutes"], "feeling": w["feeling"]}
             for w in db.manual_workouts_between(user.id, start, end)
         ]

@@ -146,6 +146,11 @@ def _by_day(records: list[dict]) -> dict[str, dict]:
     return {r["day"]: r for r in records}
 
 
+# Oura workout names -> the neutral workout kind every engine reads (connectors/base.py). Only names seen in
+# fixtures/ are mapped; anything else is "other".
+OURA_KINDS = {"running": "run", "walking": "walk", "strengthTraining": "strength", "yoga": "yoga"}
+
+
 def daily_metrics(raw: dict, day: date, tz=TZ) -> dict:
     """One flat dict of the metrics we care about for a single day.
 
@@ -202,6 +207,7 @@ def daily_metrics(raw: dict, day: date, tz=TZ) -> dict:
         "workouts": [
             {
                 "activity": w["activity"],
+                "kind": OURA_KINDS.get(w["activity"], "other"),
                 "intensity": w["intensity"],
                 "start": local(w["start_datetime"]).isoformat(timespec="minutes"),
                 "end": local(w["end_datetime"]).isoformat(timespec="minutes"),

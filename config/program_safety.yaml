@@ -1,0 +1,21 @@
+# Safety limits every program template and every generated plan must pass (programs/validate.py).
+# Code applies them; nothing here is a template's choice. Numbers we chose ourselves say so in an `ours:` comment.
+
+# A week's load in one discipline (km, minutes or elevation, the discipline's measure) is at most
+# 1.25 x the highest week among the 3 before it, so a lighter week doesn't reset the baseline.
+# Decided 2026-11-14. A session marked `recovery` (easy cross-training) is not part of the load, but only if it is
+# easy: intensity at most recovery_max_intensity (decided 2026-11-15); a "recovery" session above that counts.
+weekly_growth_max: 0.25
+growth_lookback_weeks: 3
+recovery_max_intensity: 2
+
+# The week's long session is at most 1.25 x the longest session of that discipline in the 30 days before.
+# The dated event itself is exempt. Decided 2026-11-14 (the same 25% as the weekly load).
+long_session_growth_max: 0.25
+long_session_lookback_days: 30
+
+# Every calendar week has at least this many days with no session.
+min_rest_days_per_week: 1
+
+# ours: before a dated event, the event's week (the 6 days before it) holds at most 75% of the peak week's load.
+taper_max_of_peak: 0.75

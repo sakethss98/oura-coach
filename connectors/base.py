@@ -15,7 +15,16 @@ class HealthSource(Protocol):
         """The main sleep that ended on `day`: {"score", "hours", "hrv_ms", "resting_hr"}"""
 
     def workouts(self, user, day: date) -> list[dict]:
-        """[{"source", "activity" or "workout_type", "start", "end", "minutes", ...}]"""
+        """[{"source", "kind", "activity" or "workout_type", "start", "end", "minutes", ...}]. `kind` is neutral,
+        the same for every device: run | walk | strength | cycle | swim | hike | hiit | mobility | yoga | other.
+        The goal engine reads only `kind` (the device's own name stays for the training module)."""
 
     def activity(self, user, day: date) -> dict | None:
         """{"steps", "active_calories", ...}"""
+
+
+# One day as every engine sees it, whatever the device (connectors/health.neutral_day builds it):
+# {"day", "readiness" (0-100 or None: not every device has one), "sleep_hours", "hrv_ms", "resting_hr", "steps",
+#  "workouts": [{"kind", "start", "end", "minutes", "distance_km", "source"}]}. Missing values are None; a person
+# with no wearable has only the workouts they add in chat.
+NEUTRAL_DAY_KEYS = ("day", "readiness", "sleep_hours", "hrv_ms", "resting_hr", "steps", "workouts")

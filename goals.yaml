@@ -1,14 +1,5 @@
-race:
-  target_date: 2026-12-31     # change to a real race date if you pick one
-  goal_time: "1:59:59"        # stretch
-  acceptable_time: "2:29:59"
-  last_result: "3:39"
-
-primary_goal: "Visible abs by end of 2026"   # mandatory; the race is best-effort
-
-current:
-  continuous_run_min: 20      # update
-  longest_session_km: 11.6    # update
+# Goals (a race, its date and target time, a direction goal) are set in chat and stored per person
+# (goal_answers); current fitness comes from their workouts. This file holds the coaching rules only.
 
 schedule:
   preferred_time: morning

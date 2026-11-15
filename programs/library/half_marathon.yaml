@@ -1,0 +1,249 @@
+# Half marathon (21.1 km). A library template: hand-written, approved.
+#
+# Numbers: Hal Higdon's Novice 1 and Intermediate 1 half marathon schedules (halhigdon.com, checked 2026-11-08 and
+# 2026-11-15), as published in miles (code converts to km exactly, so a +25% step stays +25%). Changes, each from
+# a rule in this file and not from Higdon:
+#   - Novice only: rest the day before the long session (rest_before_long), so Novice's Saturday cross-training
+#     moves to Monday. Intermediate keeps Higdon's Saturday run before the Sunday long run (decided 2026-11-15).
+#   - Strength sessions are ours (strength_per_week; Higdon suggests lifting after Tuesday and Thursday runs for
+#     experienced lifters only). They go only after easy or short runs, or on their own, never on the long day,
+#     and no lower-body lift within 7 days of the race (light lifting only in the taper: upper body).
+# Higdon's "rest or easy run" days are rest here. "Pace" runs are at goal half-marathon pace (Higdon), from their
+# target time or their recent runs (modules/goals/paces.py), never a fixed number.
+# Offsets (`at`) count from the long session's day (0): with a Sunday long run, -6 is Monday, -5 Tuesday.
+
+name: half_marathon
+title: Half marathon
+source: library
+status: approved
+matches: [half marathon, half-marathon, "21k", "21 km", "21.1 km", "13.1"]
+event: {dated: true, measure: km, amount: 21.1, taper_weeks: 1}
+asks_user: [long_session_day, target_time, easy_pace]
+
+disciplines:
+  run:
+    measure: km
+    kinds: [run]
+    session_types:
+      easy:      {intensity: 3, pace: easy, movements: [running_impact]}
+      short:     {intensity: 2, pace: easy, movements: [running_impact]}
+      pace:      {intensity: 3, pace: race, movements: [running_impact]}
+      long:      {intensity: 4, hard: true, long: true, pace: easy, movements: [running_impact]}
+      race_test: {intensity: 5, hard: true, pace: race, movements: [running_impact]}    # Higdon's 5K / 10K
+      race:      {intensity: 5, hard: true, event: true, pace: race, movements: [running_impact]}
+    alternatives: {easy: cross.cross, short: cross.cross, pace: cross.cross, long: cross.cross}
+  cross:
+    measure: min
+    kinds: [cycle, swim, walk, hike, yoga, mobility, other]
+    session_types:
+      cross: {intensity: 2, recovery: true}     # Higdon: cross-training days are easy days to recover
+  strength:
+    measure: min
+    kinds: [strength]
+    session_types:
+      lower: {intensity: 3, default_min: 40, movements: [deep_knee_bend, spinal_load]}
+      upper: {intensity: 3, default_min: 40, movements: [overhead, grip]}
+    alternatives: {lower: strength.upper}
+
+shared:
+  max_sessions_per_week: 6
+  max_hard_per_week: 2
+  min_rest_days: 1
+  drop_order: [cross.cross, run.short, run.pace]
+  strength_per_week: {base: 2, build: 2, peak: 1, taper: 1}
+  strength_types: [strength.lower, strength.upper]
+
+placement:
+  - {kind: rest_before_long, days: 1, variants: [novice]}
+  - {kind: light_after_long, days: 1}                          # only cross-training or rest the day after
+  - {kind: keep_away_from_event, session: strength.lower, days: 7}
+  - {kind: keep_away_from_long, session: strength.lower, before: 2, after: 1}
+  - {kind: pair_only_after, session: strength, with: [run.easy, run.short]}
+  - {kind: prefer_days_before_long, session: strength.lower, offsets: [-4, -5]}
+  - {kind: not_paired_with_longest, session: strength.lower, discipline: run}
+
+variants:
+  intermediate:
+    source: Hal Higdon, Intermediate 1 half marathon (12 weeks), miles as published
+    unit: mi
+    choose_when: {long_session_km_at_least: 10, days_per_week_at_least: 4}    # ours
+    weeks:
+      - phase: base
+        sessions:
+          - {discipline: cross, type: cross, amount: 30, at: -6}
+          - {discipline: run, type: easy, amount: 3, at: -5}
+          - {discipline: run, type: easy, amount: 4, at: -4}
+          - {discipline: run, type: easy, amount: 3, at: -3}
+          - {discipline: run, type: easy, amount: 3, at: -1}
+          - {discipline: run, type: long, amount: 4, at: 0}
+      - phase: base
+        sessions:
+          - {discipline: cross, type: cross, amount: 30, at: -6}
+          - {discipline: run, type: easy, amount: 3, at: -5}
+          - {discipline: run, type: pace, amount: 4, at: -4}
+          - {discipline: run, type: easy, amount: 3, at: -3}
+          - {discipline: run, type: pace, amount: 3, at: -1}
+          - {discipline: run, type: long, amount: 5, at: 0}
+      - phase: base
+        sessions:
+          - {discipline: cross, type: cross, amount: 40, at: -6}
+          - {discipline: run, type: easy, amount: 3.5, at: -5}
+          - {discipline: run, type: easy, amount: 5, at: -4}
+          - {discipline: run, type: easy, amount: 3.5, at: -3}
+          - {discipline: run, type: long, amount: 6, at: 0}
+      - phase: base
+        sessions:
+          - {discipline: cross, type: cross, amount: 40, at: -6}
+          - {discipline: run, type: easy, amount: 3.5, at: -5}
+          - {discipline: run, type: pace, amount: 5, at: -4}
+          - {discipline: run, type: easy, amount: 3.5, at: -3}
+          - {discipline: run, type: easy, amount: 3, at: -1}
+          - {discipline: run, type: long, amount: 7, at: 0}
+      - phase: build
+        sessions:
+          - {discipline: cross, type: cross, amount: 40, at: -6}
+          - {discipline: run, type: easy, amount: 4, at: -5}
+          - {discipline: run, type: easy, amount: 6, at: -4}
+          - {discipline: run, type: easy, amount: 4, at: -3}
+          - {discipline: run, type: pace, amount: 3, at: -1}
+          - {discipline: run, type: long, amount: 8, at: 0}
+      - phase: build
+        lighter: true
+        sessions:
+          - {discipline: cross, type: cross, amount: 50, at: -6}
+          - {discipline: run, type: easy, amount: 4, at: -5}
+          - {discipline: run, type: pace, amount: 6, at: -4}
+          - {discipline: run, type: easy, amount: 4, at: -3}
+          - {discipline: run, type: race_test, amount: 3.107, at: 0}     # 5-K race
+      - phase: build
+        sessions:
+          - {discipline: run, type: easy, amount: 4.5, at: -5}
+          - {discipline: run, type: easy, amount: 7, at: -4}
+          - {discipline: run, type: easy, amount: 4.5, at: -3}
+          - {discipline: run, type: pace, amount: 4, at: -1}
+          - {discipline: run, type: long, amount: 9, at: 0}
+      - phase: build
+        sessions:
+          - {discipline: cross, type: cross, amount: 50, at: -6}
+          - {discipline: run, type: easy, amount: 4.5, at: -5}
+          - {discipline: run, type: pace, amount: 7, at: -4}
+          - {discipline: run, type: easy, amount: 4.5, at: -3}
+          - {discipline: run, type: pace, amount: 5, at: -1}
+          - {discipline: run, type: long, amount: 10, at: 0}
+      - phase: build
+        lighter: true
+        sessions:
+          - {discipline: cross, type: cross, amount: 60, at: -6}
+          - {discipline: run, type: easy, amount: 5, at: -5}
+          - {discipline: run, type: easy, amount: 8, at: -4}
+          - {discipline: run, type: easy, amount: 5, at: -3}
+          - {discipline: run, type: race_test, amount: 6.214, at: 0}     # 10-K race
+      - phase: peak
+        sessions:
+          - {discipline: run, type: easy, amount: 5, at: -5}
+          - {discipline: run, type: pace, amount: 8, at: -4}
+          - {discipline: run, type: easy, amount: 5, at: -3}
+          - {discipline: run, type: pace, amount: 5, at: -1}
+          - {discipline: run, type: long, amount: 11, at: 0}
+      - phase: peak
+        sessions:
+          - {discipline: cross, type: cross, amount: 60, at: -6}
+          - {discipline: run, type: easy, amount: 5, at: -5}
+          - {discipline: run, type: easy, amount: 6, at: -4}
+          - {discipline: run, type: easy, amount: 4, at: -3}
+          - {discipline: run, type: pace, amount: 3, at: -1}
+          - {discipline: run, type: long, amount: 12, at: 0}
+      - phase: taper
+        sessions:
+          - {discipline: run, type: easy, amount: 4, at: -5}
+          - {discipline: run, type: pace, amount: 4, at: -4}
+          - {discipline: run, type: easy, amount: 2, at: -3}
+          - {discipline: run, type: race, amount: 13.1094, at: 0}        # the half marathon
+
+  novice:
+    source: Hal Higdon, Novice 1 half marathon (12 weeks), miles as published
+    unit: mi
+    weeks:
+      - phase: base
+        sessions:
+          - {discipline: cross, type: cross, amount: 30, at: -6}
+          - {discipline: run, type: easy, amount: 3, at: -5}
+          - {discipline: run, type: short, amount: 2, at: -4}
+          - {discipline: run, type: easy, amount: 3, at: -3}
+          - {discipline: run, type: long, amount: 4, at: 0}
+      - phase: base
+        sessions:
+          - {discipline: cross, type: cross, amount: 30, at: -6}
+          - {discipline: run, type: easy, amount: 3, at: -5}
+          - {discipline: run, type: short, amount: 2, at: -4}
+          - {discipline: run, type: easy, amount: 3, at: -3}
+          - {discipline: run, type: long, amount: 4, at: 0}
+      - phase: base
+        sessions:
+          - {discipline: cross, type: cross, amount: 40, at: -6}
+          - {discipline: run, type: easy, amount: 3.5, at: -5}
+          - {discipline: run, type: short, amount: 2, at: -4}
+          - {discipline: run, type: easy, amount: 3.5, at: -3}
+          - {discipline: run, type: long, amount: 5, at: 0}
+      - phase: base
+        sessions:
+          - {discipline: cross, type: cross, amount: 40, at: -6}
+          - {discipline: run, type: easy, amount: 3.5, at: -5}
+          - {discipline: run, type: short, amount: 2, at: -4}
+          - {discipline: run, type: easy, amount: 3.5, at: -3}
+          - {discipline: run, type: long, amount: 5, at: 0}
+      - phase: build
+        sessions:
+          - {discipline: cross, type: cross, amount: 40, at: -6}
+          - {discipline: run, type: easy, amount: 4, at: -5}
+          - {discipline: run, type: short, amount: 2, at: -4}
+          - {discipline: run, type: easy, amount: 4, at: -3}
+          - {discipline: run, type: long, amount: 6, at: 0}
+      - phase: build
+        lighter: true
+        sessions:
+          - {discipline: run, type: easy, amount: 4, at: -5}
+          - {discipline: run, type: short, amount: 2, at: -4}
+          - {discipline: run, type: easy, amount: 4, at: -3}
+          - {discipline: run, type: race_test, amount: 3.107, at: 0}     # 5-K race
+      - phase: build
+        sessions:
+          - {discipline: cross, type: cross, amount: 50, at: -6}
+          - {discipline: run, type: easy, amount: 4.5, at: -5}
+          - {discipline: run, type: short, amount: 3, at: -4}
+          - {discipline: run, type: easy, amount: 4.5, at: -3}
+          - {discipline: run, type: long, amount: 7, at: 0}
+      - phase: build
+        sessions:
+          - {discipline: cross, type: cross, amount: 50, at: -6}
+          - {discipline: run, type: easy, amount: 4.5, at: -5}
+          - {discipline: run, type: short, amount: 3, at: -4}
+          - {discipline: run, type: easy, amount: 4.5, at: -3}
+          - {discipline: run, type: long, amount: 8, at: 0}
+      - phase: build
+        lighter: true
+        sessions:
+          - {discipline: run, type: easy, amount: 5, at: -5}
+          - {discipline: run, type: short, amount: 3, at: -4}
+          - {discipline: run, type: easy, amount: 5, at: -3}
+          - {discipline: run, type: race_test, amount: 6.214, at: 0}     # 10-K race
+      - phase: peak
+        sessions:
+          - {discipline: cross, type: cross, amount: 60, at: -6}
+          - {discipline: run, type: easy, amount: 5, at: -5}
+          - {discipline: run, type: short, amount: 3, at: -4}
+          - {discipline: run, type: easy, amount: 5, at: -3}
+          - {discipline: run, type: long, amount: 9, at: 0}
+      - phase: peak
+        sessions:
+          - {discipline: cross, type: cross, amount: 60, at: -6}
+          - {discipline: run, type: easy, amount: 5, at: -5}
+          - {discipline: run, type: short, amount: 3, at: -4}
+          - {discipline: run, type: easy, amount: 5, at: -3}
+          - {discipline: run, type: long, amount: 10, at: 0}
+      - phase: taper
+        sessions:
+          - {discipline: run, type: easy, amount: 4, at: -5}
+          - {discipline: run, type: short, amount: 3, at: -4}
+          - {discipline: run, type: easy, amount: 2, at: -3}
+          - {discipline: run, type: race, amount: 13.1094, at: 0}        # the half marathon
