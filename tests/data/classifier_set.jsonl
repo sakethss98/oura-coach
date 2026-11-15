@@ -109,3 +109,7 @@
 {"text": "am I becoming a hybrid athlete by December?", "categories": ["goal_program"], "source": "scenario"}
 {"text": "give me a run followed by weights", "categories": ["training"], "source": "scenario"}
 {"text": "my knee hurts when I run", "categories": ["pain_injury"], "source": "scenario"}
+{"text": "how much protein is in a Chobani plain Greek yogurt?", "categories": ["nutrition"], "source": "scenario"}
+{"text": "had one at 9", "categories": ["logging"], "source": "scenario"}
+{"text": "200 g chicken breast, a cup of rice and a tablespoon of olive oil for lunch", "categories": ["logging"], "source": "scenario"}
+{"text": "should I have a Chobani plain Greek yogurt now?", "categories": ["nutrition"], "source": "scenario"}

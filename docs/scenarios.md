@@ -24,6 +24,7 @@ Runtime guards are added only for (a) a wrong fact about their data, (b) safety,
 - **G-5** Scenario 27 (live, 2026-11-14): nothing was saved and it asked for the days, but as an instruction ("Tell me the exact days (e.g., Oct 10–14…)") with no "?", so the test's question-mark check failed. Check (judge): it asks which days.
 - **G-6** E-10 (live, 2026-11-15, 1 of 2 runs): an honest "not there yet" from the code's milestones, but it left out that lifts, muscle and body composition aren't measured (the skill's honesty rule). Check (judge): it says what it can't measure.
 - **G-7** Scenario 32 (live, 2026-11-15, 1 run; 3 of 3 on a rerun): user 2's "what do you know about me?" got "Any other allergies or medications I should note?" instead of the answer (nothing saved yet). Check (judge): it answered what was asked.
+- **G-8** Scenario 15 (live, 2026-11-15, 1 of 3 runs): "should I have a Celsius right now?" got food_facts' numbers and a line about their day, but no clear yes or no. Check (judge): it answers whether to have it.
 
 ## Greeting and replies
 
@@ -124,6 +125,14 @@ The race here (a half marathon on Mon Feb 15, 2027, under 2:30) is test data; th
 - **E-14** "my knee hurts when I run" → an offer to plan around it → "yes" → "Saved: no running impact for your knee until you tell me it's better." (code), and the next workout plan has no run. Must not: "saved" without the tool.
 - **E-15** No wearable (only workouts added in chat) → the goal is set up from their answers (their pace is asked) and the plan is made.
 - **E-16** (code only) A drafted template that grows +35% in a week never makes a plan. (tests/test_program_validate.py)
+
+## M4 Part F — USDA FoodData Central (2026-11-15)
+
+The model only reads foods and amounts; code looks them up (USDA FoodData Central over the pinned MCP server) and does every sum. Logging and "how much is in it?" use the same path.
+
+- **F-1** A branded item: "how much protein is in a Chobani plain Greek yogurt?" → the numbers from USDA FoodData Central (its Chobani food), sent as built, with a code line "Numbers: USDA FoodData Central (…)" (and "amount estimated" when USDA has no serving size for it); then "had one at 9" → logged with exactly the same numbers. Must not: different numbers logged than answered, the source named in the coach's own words.
+- **F-2** A mixed dish with weights: "200 g chicken breast, a cup of rice and a tablespoon of olive oil for lunch" → each item looked up and converted to grams by code (200 g; 1 cup = 158 g; 1 tablespoon = 14 g), summed by code, logged with the USDA line. Must not: a total the model added up.
+- **F-3** The server down: the same question → the model's rough numbers, marked approximate ("These are approximate (not from USDA FoodData Central)"), and no USDA line. Must not: USDA named for numbers it didn't give.
 
 ## Added during Phase 3 (2026-10-18)
 

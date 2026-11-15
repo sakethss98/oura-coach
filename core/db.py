@@ -127,7 +127,8 @@ CREATE TABLE IF NOT EXISTS food_log (
     confidence        TEXT,              -- low / med / high
     logged_at         TEXT,              -- when the entry was saved
     updated_at        TEXT,              -- last edit
-    user_numbers_json TEXT               -- JSON list of fields the person stated (never re-estimated)
+    user_numbers_json TEXT,              -- JSON list of fields the person stated (never re-estimated)
+    nutrition_json    TEXT               -- JSON list of items: grams, numbers, USDA food or "approximate" (Part F)
 );
 
 CREATE TABLE IF NOT EXISTS memory (
@@ -506,6 +507,8 @@ def _m4_steps(conn) -> list[str]:
         steps.append("drop context_notes")
     if "users" in tables and "goals" not in tables:
         steps.append("enable goals for user 1")
+    if "food_log" in tables and "nutrition_json" not in _columns(conn, "food_log"):
+        steps.append("food_log.nutrition_json")
     return steps
 
 
@@ -528,6 +531,8 @@ def _m4_migrate(conn, steps: list[str]) -> None:
         if missing:
             raise RuntimeError(f"{missing} active context note(s) are not in memory; context_notes was not dropped.")
         conn.execute("DROP TABLE context_notes")
+    if "nutrition_json" not in _columns(conn, "food_log"):          # Part F: where each number came from
+        conn.execute("ALTER TABLE food_log ADD COLUMN nutrition_json TEXT")
     if "enable goals for user 1" in steps:       # once, when the goal tables first appear (Part E)
         row = conn.execute("SELECT enabled_modules FROM user_settings WHERE user_id = 1").fetchone()
         if row:
@@ -955,11 +960,12 @@ def ask_once(user_id: int, question: str) -> bool:
 
 
 def add_food(user_id: int, raw_text: str, estimate: dict, eaten_at: datetime,
-             user_numbers: list[str] | None = None) -> dict:
+             user_numbers: list[str] | None = None, items: list[dict] | None = None) -> dict:
     """Save one food entry (every call is a new row, repeats included) and return it."""
     row = {"user_id": user_id, "timestamp": _iso(eaten_at), "raw_text": raw_text,
            **{f: estimate.get(f) for f in FOOD_FIELDS}, "logged_at": _stamp(),
-           "user_numbers_json": json.dumps(user_numbers or [])}
+           "user_numbers_json": json.dumps(user_numbers or []),
+           "nutrition_json": json.dumps(items, default=str) if items is not None else None}
     with connect() as conn:
         cur = conn.execute(f"INSERT INTO food_log ({', '.join(row)}) VALUES ({', '.join('?' * len(row))})",
                            list(row.values()))
@@ -979,7 +985,7 @@ def get_food(user_id: int, entry_id: int) -> dict | None:
 
 def update_food(user_id: int, entry_id: int, fields: dict) -> dict | None:
     """Change fields of one entry in place (never a new row). Returns the updated entry."""
-    allowed = set(FOOD_FIELDS) | {"raw_text", "timestamp", "user_numbers_json"}
+    allowed = set(FOOD_FIELDS) | {"raw_text", "timestamp", "user_numbers_json", "nutrition_json"}
     unknown = set(fields) - allowed
     if unknown:
         raise ValueError(f"Unknown food_log fields: {unknown}")

@@ -25,7 +25,8 @@ from core import agent, citations, classifier, db, reply_rules, users  # noqa: E
 from core.config import DB_PATH, FIXTURES_DIR  # noqa: E402
 from modules.nutrition import food  # noqa: E402
 from modules.nutrition import meals  # noqa: E402
-from modules.nutrition.schemas import FoodEstimate, MealIdeas, MealOption, Portion, Recipe  # noqa: E402
+from modules.nutrition.schemas import (FoodItem, FoodItems, ItemGuess, MealIdeas, MealOption, Portion,  # noqa: E402
+                                       Recipe)
 from modules.training import planner as graph  # noqa: E402
 from modules.training import checkin  # noqa: E402
 from modules.training.schemas import Block, CheckinParse, Plan, Request  # noqa: E402
@@ -176,10 +177,45 @@ def fake_gssi(request, monkeypatch):
 
     def scripted_call(server, tool_name, args):
         calls.append((server, tool_name, args))
+        if server == "usda":
+            return USDA_SAVED.answer(tool_name, args)
         return {"results": FAKE_SOURCES[:args.get("k", 4)]}
 
     monkeypatch.setattr(mcp_tools, "call", scripted_call)
+    USDA_SAVED.on = False
     yield calls
+    USDA_SAVED.on = False
+
+
+class SavedUSDA:
+    """USDA FoodData Central in scripted tests: off (the server down: None) unless a test uses the `usda` fixture,
+    which answers from the real responses saved in fixtures/usda/ (search by its exact query, details by id)."""
+    on = False
+
+    def answer(self, tool_name, args):
+        if not self.on:
+            return None
+        folder = FIXTURES_DIR / "usda"
+        if tool_name == "search_foods":
+            saved = json.loads((folder / "search.json").read_text())
+            found = saved.get(args["query"])
+            return found if isinstance(found, dict) else {"foods": [], "totalHits": 0}
+        if tool_name == "get_food_details":
+            return json.loads((folder / "details.json").read_text()).get(str(args["fdc_id"]))
+        return None
+
+
+USDA_SAVED = SavedUSDA()
+needs_usda_fixtures = pytest.mark.skipif(not (FIXTURES_DIR / "usda" / "search.json").exists(),
+                                         reason="fixtures/usda/ not present (gitignored)")
+
+
+@pytest.fixture
+def usda():
+    """Scripted USDA lookups from fixtures/usda/ (real saved responses)."""
+    USDA_SAVED.on = True
+    yield USDA_SAVED
+    USDA_SAVED.on = False
 
 
 CHECK_STOP = frozenset("that with your this from have about more just only also usually which when will should could would "
@@ -248,6 +284,7 @@ class FakeLLM:
         self.food_queue: list[dict] = []          # estimate fields to change for the next food calls
         self.meal = ideas("Dal palak with jeera rice", "Spinach moong dal khichdi")
         self.meal_queue: list[MealIdeas] = []
+        self.food_items_queue: list[FoodItems] = []    # a whole reading of the next food entries, in order
         self.recipe = Recipe(portions=[Portion(food="moong dal", grams=60, household="1/3 cup dry"),
                                        Portion(food="spinach", grams=100, household="2 cups")],
                              steps=["Rinse the dal and rice.", "Pressure cook with spinach for 3 whistles."],
@@ -267,7 +304,15 @@ class FakeLLM:
             fields = {"entry_type": "meal", "est_protein_g": 20, "est_fiber_g": 6, "est_carbs_g": 60,
                       "est_calories": self.food_calories, "est_caffeine_mg": 0, "alcohol_drinks": 0,
                       "confidence": "med"}
-            return FoodEstimate(**fields | (self.food_queue.pop(0) if self.food_queue else {}))
+            fields |= self.food_queue.pop(0) if self.food_queue else {}
+            if self.food_items_queue:
+                return self.food_items_queue.pop(0)
+            guess = {"protein_g": fields["est_protein_g"], "fiber_g": fields["est_fiber_g"],
+                     "carbs_g": fields["est_carbs_g"], "calories": fields["est_calories"],
+                     "caffeine_mg": fields["est_caffeine_mg"], "alcohol_drinks": fields["alcohol_drinks"]}
+            item = FoodItem(name="it", usda_query="unmatched test food", brand=None, quantity=None, unit=None,
+                            grams_guess=200, guess=ItemGuess(**guess))      # one item, the guess: as before
+            return FoodItems(entry_type=fields["entry_type"], confidence=fields["confidence"], items=[item])
         if kind == "meal":
             return self.meal_queue.pop(0) if self.meal_queue else self.meal
         if kind == "recipe":
@@ -415,3 +460,12 @@ def chat_model(monkeypatch):
 def tool_results(messages) -> list[dict]:
     """Parsed JSON tool results in a list of messages."""
     return [json.loads(m.content) for m in messages if m.type == "tool" and m.content.startswith("{")]
+
+
+@pytest.fixture(autouse=True)
+def fresh_food_reads():
+    """The kept readings of food texts (modules/nutrition/food.py) never carry over from another test."""
+    from modules.nutrition import food as food_module
+    food_module._read.clear()
+    yield
+    food_module._read.clear()

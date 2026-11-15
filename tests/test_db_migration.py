@@ -252,3 +252,15 @@ def test_a_part_d_database_is_backed_up_then_gets_the_goal_tables_and_module(par
         conn.execute("UPDATE user_settings SET enabled_modules = '[\"training\"]' WHERE user_id = 1")
     db.init_db()
     assert len(backups(part_d_db)) == 1 and json.loads(db.get_user_row(1)["enabled_modules"]) == ["training"]
+
+
+def test_food_log_gains_nutrition_json_after_a_backup(at_path):
+    db.init_db()
+    with sqlite3.connect(at_path) as conn:
+        conn.execute("ALTER TABLE food_log DROP COLUMN nutrition_json")
+        conn.execute("INSERT INTO food_log (user_id, timestamp, raw_text) VALUES (1, '2026-11-15T08:00:00-06:00', 'poha')")
+    db.init_db()
+    [backup] = backups(at_path)
+    assert "nutrition_json" not in columns(backup, "food_log") and "nutrition_json" in columns(at_path, "food_log")
+    with sqlite3.connect(at_path) as conn:
+        assert conn.execute("SELECT raw_text, nutrition_json FROM food_log").fetchall() == [("poha", None)]

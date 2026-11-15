@@ -222,6 +222,17 @@ def has_digit(text: str) -> bool:
     return bool(re.search(r"\d", MARKER_TEXT.sub(" ", text)))
 
 
+def fit_words(text: str, used: int, most_sentences: int) -> str:
+    """The first sentences of `text` (at most `most_sentences`) that fit in the 60 words left after `used`."""
+    kept, count = [], used
+    for sentence in [x for x in re.split(r"(?<=[.!?])\s+|\n+", text.strip()) if x][:most_sentences]:
+        if count + len(sentence.split()) > MAX_WORDS:
+            break
+        kept.append(sentence)
+        count += len(sentence.split())
+    return " ".join(kept)
+
+
 def own_line(text: str) -> str:
     """The coach's own line next to a code-built plan: at most two sentences, in order, qualitative only. Clause by
     clause it loses any number (every amount and time is in the plan; markers like [1] don't count), a recap of

@@ -363,6 +363,8 @@ def _within_rules(draft: str, tools_called: set[str], t, offered: set[str] | Non
             or reply_rules.enforce(draft, tools_called, offered, sources, facts))
 
 
+# Code-built facts that don't answer a "should I…?" on their own (food_facts' numbers): the agent's line stays.
+FACT_TOOLS = {"food_facts"}
 LOG_TOOLS = {"log_food", "add_manual_workout", "mark_done", "save_body_weight"}
 # Write tools whose code-built text is itself the confirmation ("Marked done: HIIT 12:12–1:03pm (from Oura).").
 # save_body_weight's text is the redone plan, so the agent still confirms the weight in a few words.
@@ -480,7 +482,7 @@ def respond(state: AgentState, config) -> dict:
         # code text answers it ("done, what should I eat?" = mark_done's confirmation + suggest_meal's ideas: both
         # by code). A bare "done" gets mark_done's confirmation alone.
         covered = writes <= built_by & CONFIRMED_BY_TEXT
-        answered = bool(built_by - WRITE_TOOLS)
+        answered = bool(built_by - WRITE_TOOLS - FACT_TOOLS)
         repeats = any(draft and draft in v for v in verbatim)
         explains = bool(tools_called & KNOWLEDGE_TOOLS)     # its own words on the science, with the link
         beside_plan = bool(built_by & AMOUNT_TOOLS)
@@ -489,8 +491,13 @@ def respond(state: AgentState, config) -> dict:
                                   and m.name in AMOUNT_TOOLS and isinstance(m.artifact, dict) and m.artifact.get("verbatim"))
             facts = dataclasses.replace(facts, plan_topics=reply_rules.topics(plan_text))
         draft = guarded(draft, beside_plan)
+        if built_by & FACT_TOOLS:      # next to food numbers: its answer in words, no food amounts, within the budget
+            draft = reply_rules.without_amounts(draft)
         if draft and not repeats and (explains or (asked and not answered) or (writes and not covered)):
-            parts.append(guarded(_within_rules(draft, tools_called, t, offered, sources, facts), beside_plan))
+            own = guarded(_within_rules(draft, tools_called, t, offered, sources, facts), beside_plan)
+            if built_by & FACT_TOOLS:
+                own = reply_rules.fit_words(own, sum(len(v.split()) for v in dict.fromkeys(verbatim)), 2)
+            parts.append(own)
     elif draft:
         parts.append(guarded(_within_rules(draft, tools_called, t, offered, sources, facts)))
     weight = _saved_weight(turn_messages)
@@ -503,6 +510,10 @@ def respond(state: AgentState, config) -> dict:
     if sources:     # a [n] stays only on a claim its passages state (else the sentence is the coach's own)
         reply = citations.check_markers(citations.mark_urls(reply, sources), sources, t.user.id)[0]
     reply = citations.finish(reply, sources, code_sources)   # clean [n] markers + the source lines, by code
+    data_lines = list(dict.fromkeys(m.artifact["source_line"] for m in turn_messages if isinstance(m, ToolMessage)
+                                    and isinstance(m.artifact, dict) and m.artifact.get("source_line")))
+    if data_lines:     # where food numbers came from ("Numbers: USDA FoodData Central (…)"), by code
+        reply = reply.rstrip() + "".join(f"\n{line}" for line in data_lines)
     if state.get("expired_checkin"):
         reply += f"\n{EXPIRED_CHECKIN}"
     return {"messages": [AIMessage(content=reply, id=final.id)]}   # same id: replaces the draft in the thread

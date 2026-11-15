@@ -6,3 +6,11 @@ servers:
     args: ["-m", "mcp_servers.gssi.server"]
     env: [OPENAI_API_KEY]         # to embed the query
     timeout_s: 15
+  usda:                           # USDA FoodData Central (M4 Part F): FelipeAdachi/mcp-food-data-central, pinned
+    command: vendor/usda-mcp/.venv/bin/python     # its own virtualenv (scripts/install_usda_mcp.sh)
+    args: ["src/main.py"]
+    cwd: vendor/usda-mcp
+    env: [USDA_API_KEY]
+    set_env: {TRANSPORT: stdio}   # its default is HTTP on 0.0.0.0:8050: never that
+    timeout_s: 15
+

@@ -1042,7 +1042,7 @@ def test_live_5b_two_days_of_dinner_ideas_are_different(coach, user, real_meals)
 
 
 @live
-def test_live_15_16_questions_and_later_are_not_logged(coach, user):
+def test_live_15_16_questions_and_later_are_not_logged(coach, user, real_food):
     chat = Chat(coach, user)
     answer = chat.send("should I have a Celsius right now?", 15, 0)
     chat.send("I'm going to have pizza later", 15, 1)
@@ -2203,6 +2203,9 @@ COVERAGE = {
     "E-14": ("test_e_14_a_knee_limit_is_saved_on_yes_and_the_next_plan_has_no_run", "test_live_e_14_knee_limit"),
     "E-15": ("test_e_15_no_wearable_asks_their_pace_and_still_plans", "test_live_e_15_no_wearable"),
     "E-16": ("test_a_drafted_35_percent_template_never_makes_a_plan_and_pending_review_never_does", None),
+    "F-1": ("test_f_1_a_branded_item_is_answered_and_logged_with_the_same_numbers", "test_live_f_1_branded_item"),
+    "F-2": ("test_f_2_a_mixed_dish_is_looked_up_item_by_item_and_summed_by_code", "test_live_f_2_mixed_dish"),
+    "F-3": ("test_f_3_the_server_down_gives_approximate_numbers_and_no_usda_line", "test_live_f_3_server_down"),
 }
 
 
@@ -2212,11 +2215,12 @@ def _marks(test) -> set[str]:
 
 def test_every_scenario_in_the_doc_has_a_scripted_and_a_live_test():
     text = SCENARIOS_DOC.read_text()
-    ids = re.findall(r"^- \*\*([0-9]+[a-z]?|M4-\d+[a-z]?|E-\d+[a-z]?)\b", text, re.M)
+    ids = re.findall(r"^- \*\*([0-9]+[a-z]?|M4-\d+[a-z]?|[EF]-\d+[a-z]?)\b", text, re.M)
     assert sorted(ids) == sorted(COVERAGE), set(ids) ^ set(COVERAGE)
     code_only = set(re.findall(r"^- \*\*(E-\d+[a-z]?)\*\* \(code only\)", text, re.M))
-    from tests import test_generator, test_goal_scenarios, test_program_validate
-    tests = {**vars(test_generator), **vars(test_program_validate), **vars(test_goal_scenarios), **globals()}
+    from tests import test_food_scenarios, test_generator, test_goal_scenarios, test_program_validate
+    tests = {**vars(test_generator), **vars(test_program_validate), **vars(test_goal_scenarios),
+             **vars(test_food_scenarios), **globals()}
     for scenario, (scripted, live_name) in COVERAGE.items():
         assert scripted in tests and "live_llm" not in _marks(tests[scripted]), scenario
         if scenario in code_only:                   # an engine test: no model involved, so no live run

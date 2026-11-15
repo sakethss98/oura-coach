@@ -302,3 +302,10 @@ def test_more_carbs_next_to_a_plan_that_says_none_is_a_violation():
     assert not any("no extra carbs" in p for p in violations(drift, set(), facts=TurnFacts(carb_load=True)))
     fine = "Readiness is 75 and the week was light, so your usual meals will do [1]."
     assert not violations(fine, set(), facts=TurnFacts(carb_load=False))
+
+
+def test_the_line_next_to_code_text_fits_the_words_left():
+    from core.reply_rules import fit_words
+    text = "Go for it this afternoon. It's a strong hit, so skip it if you sleep early. Tea is gentler."
+    assert fit_words(text, 25, 2) == "Go for it this afternoon. It's a strong hit, so skip it if you sleep early."
+    assert fit_words(text, 50, 2) == "Go for it this afternoon."

@@ -22,8 +22,8 @@ from core.labels import clock
 from core.timeparse import parse_clock_time, resolve_dates, resolve_past_day
 from core.tools import GroupBy, Messages, as_json, ids_shown, range_for, range_label, turn, with_range_args
 from modules.nutrition import fueling, history, meals
-from modules.nutrition.food import edit_food as change_food, log_food as save_food
-from modules.nutrition.messages import confirm_entry
+from modules.nutrition.food import edit_food as change_food, log_food as save_food, lookup_and_sum
+from modules.nutrition.messages import confirm_entry, food_answer, items_of, source_line
 from modules.nutrition.targets import dish_key
 from modules.training.baseline import food_totals
 
@@ -79,10 +79,10 @@ def _numbers(calories, protein_g, carbs_g, fiber_g, caffeine_mg) -> dict:
             "caffeine_mg": caffeine_mg}
 
 
-@tool
+@tool(response_format="content_and_artifact")
 def log_food(text: str, time_text: str | None, state: Messages, config: RunnableConfig,
              calories: float | None = None, protein_g: float | None = None, carbs_g: float | None = None,
-             fiber_g: float | None = None, caffeine_mg: float | None = None) -> str:
+             fiber_g: float | None = None, caffeine_mg: float | None = None) -> tuple[str, dict]:
     """Log something they ate or drank (meal, snack, drink, coffee, alcohol, supplement) with a rough estimate.
     Only what they already had: not a question about a food, not something they plan to eat later.
     text: what they had, in their words, without the time. time_text: a clock time exactly as written, or null.
@@ -92,13 +92,28 @@ def log_food(text: str, time_text: str | None, state: Messages, config: Runnable
     if CORRECTION.search(_last_human(state)) and _food_logged_today(t):
         return as_json({"saved": False, "reason": "this corrects food already logged, so it is not new food; "
                         "nothing was saved (edit_food changes an entry in place; ids are in earlier log_food or "
-                        "list_food results)"})
+                        "list_food results)"}), {}
     eaten_at = parse_clock_time(time_text, t.now)
     row = save_food(t.user, text, eaten_at or t.now, _numbers(calories, protein_g, carbs_g, fiber_g, caffeine_mg))
     result = {"saved": True, "id": row["id"], "confirmation": confirm_entry(row, time_stated=eaten_at is not None)}
     if time_text and eaten_at is None:
         result["time_read"] = f"could not read the time {time_text!r}; used the message time"
-    return as_json(result)
+    line = source_line(items_of(row))
+    return as_json(result), ({"source_line": line} if line else {})
+
+
+@tool(response_format="content_and_artifact")
+def food_facts(text: str, config: RunnableConfig) -> tuple[str, dict]:
+    """What's in a food or drink they ask about ("how much protein is in a Chobani?", "calories in 200 g chicken
+    and a cup of rice?"): looked up in code the same way log_food logs it. Nothing is logged. text: the food and
+    amount in their words. The answer is sent to them as is."""
+    t = turn(config)
+    found = lookup_and_sum(t.user, text, t.day)
+    from modules.nutrition.usda import total
+    answer = food_answer(text[:1].upper() + text[1:], found["items"], total(found["items"]))
+    line = source_line(found["items"])
+    return (as_json({"sent_as_is": True, "from_usda": any(i.get("source") for i in found["items"])}),
+            {"verbatim": answer, **({"source_line": line} if line else {})})
 
 
 @tool
@@ -357,4 +372,4 @@ def save_body_weight(weight: float, unit: Literal["kg", "lb"], state: Messages,
 
 
 TOOLS = [log_food, edit_food, list_food, remove_food, suggest_meal, meal_recipe, food_range, fueling_plan,
-         save_body_weight]
+         save_body_weight, food_facts]

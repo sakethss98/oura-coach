@@ -39,11 +39,13 @@ def server_config() -> dict:
 
 
 def connection(name: str) -> dict:
-    """The stdio connection for a server: this interpreter for "python", only the listed env variables."""
+    """The stdio connection for a server: this interpreter for "python" (else a path from the project root),
+    only the listed env variables plus its fixed `set_env` values, run in its `cwd` (default: the project root)."""
     c = server_config()[name]
-    command = sys.executable if c["command"] == "python" else c["command"]
-    env = {key: os.environ[key] for key in c.get("env", []) if os.getenv(key)}
-    return {"transport": "stdio", "command": command, "args": c.get("args", []), "env": env, "cwd": str(ROOT)}
+    command = sys.executable if c["command"] == "python" else str(ROOT / c["command"])
+    env = {key: os.environ[key] for key in c.get("env", []) if os.getenv(key)} | dict(c.get("set_env", {}))
+    return {"transport": "stdio", "command": command, "args": c.get("args", []), "env": env,
+            "cwd": str(ROOT / c.get("cwd", "."))}
 
 
 class _Servers:

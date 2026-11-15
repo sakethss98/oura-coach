@@ -153,6 +153,13 @@ Python 3.11+, LangGraph (langgraph, langgraph-checkpoint-sqlite), langchain-open
     - Fueling never guesses a pace: a distance with no usable pace (their runs, or the pace they gave the goal questions) asks how long the run will take (`fueling.ASK_TIME`).
     - GUILT is blame aimed at them ("you missed", "you're behind", "you should have", "lazy"); "missed" and "behind" about sessions and numbers are fine ("Moved the long run you missed to Saturday.").
   - No personal values in code: `tests/test_no_personal_values.py` scans code, config, skills, prompts, scripts and goals.yaml (goals.yaml's race / primary_goal / current blocks were removed 2026-11-15). Device names never appear in modules/goals/*.py or programs/*.py (`tests/test_signals.py`).
+- **USDA FoodData Central (M4 Part F):**
+  - **Server:** FelipeAdachi/mcp-food-data-central (Python, MIT), pinned at 47addeb, installed by `scripts/install_usda_mcp.sh` into gitignored `vendor/usda-mcp` with its own venv (versions from its uv.lock). It runs over stdio only (`config/mcp.yaml` `usda`: `set_env TRANSPORT=stdio`, since its default is HTTP on 0.0.0.0:8050) and gets only `USDA_API_KEY`. An empty `vendor/usda-mcp/.env` stops its `load_dotenv()` from walking up to our `.env` (checked: it sees no other secret). jlfwong/food-data-central-mcp-server was not picked: it needs Node, has no license file, has no build script though its README says `npm run build`, and its package.json and lock disagree on the MCP SDK version.
+  - **Flaws worked around without patching the pinned code:** its error results are `str(e)` and carry the request url with `api_key=…`, so they are never shown and are logged only through `config.redact`; a search fails whole when one result has a nutrient without a value (its pydantic model), so `usda.search` retries with 25, 10, then 5 results; USDA's dataType filter answered 400 for some single types, so searches are unfiltered and code filters.
+  - **One path:** the model only reads the text into items (`schemas.FoodItems`: name, usda_query, brand, quantity, unit, a gram guess, a per-item rough guess). Code looks each item up (`modules/nutrition/usda.py`), picks the closest food by its words (a food-changing word they didn't say, like "breaded", loses; a brand matches Branded foods and SR Legacy foods named for it), turns the amount into grams (weights directly, ml as g; a branded serving from servingSize; household measures from foodPortions), scales the per-100 g values (calories from 4/4/9 when a Branded food has none) and sums. An item with no match, an amount code can't convert, or the server down uses the model's guess for that item, marked approximate. `food.lookup_and_sum` serves log_food, edit_food and the new `food_facts` (nutrition skill only), and the reading of a text is kept for 4 hours, so the logged numbers and the answered numbers match. Items, grams and sources are saved in `food_log.nutrition_json` (backup-first migration step).
+  - **Credit is code's:** a code line "Numbers: USDA FoodData Central (food · food)" goes after the reply, with "amount estimated for …", "rough estimate for …" or "calories from its protein, carbs and fat" when true. The coach never names USDA in its own words (`without_credit`). With nothing from USDA, `food_facts` says "These are approximate (not from USDA FoodData Central)" and there is no USDA line.
+  - **Next to food_facts' numbers** the coach's line stays (they don't answer "should I have it?"; `agent.FACT_TOOLS`): no food amounts, at most two sentences, inside the 60 words left (`reply_rules.fit_words`).
+  - Parsing is built from real responses saved in `fixtures/usda/` (gitignored); scripted tests answer from them (`conftest.usda` fixture; otherwise USDA is "down" in scripted tests).
 - Every LLM call (agent, agent_rewrite, plan, food) is saved to the `runs` table (system prompt, input, parsed output). View with `scripts/show_runs.py`.
 
 ## Status
@@ -234,6 +241,10 @@ Python 3.11+, LangGraph (langgraph, langgraph-checkpoint-sqlite), langchain-open
     - `RUN_LIVE_LLM=1 pytest -q -s tests/test_goal_scenarios.py -k live` (10/10 on 2026-11-15, after the fixes below); every live scenario ×1: 68/71 (E-14 fixed, then 3/3; E-10 and 32 logged as G-6, G-7; 32 then 3/3)
     - `python scripts/eval_classifier.py` (91–94% tuning, 93–96% held out, logging 100% / 100% over the last runs)
     - `python bot.py --fixtures`: "I want to run a half marathon on Feb 15 2027", then the answers, "yes", "what's today's session?", "am I on track?"
+  - Part F USDA FoodData Central: built (2026-11-15), paused for review. Verify:
+    - `bash scripts/install_usda_mcp.sh`
+    - `pytest -q` (576 scripted; `tests/test_usda.py`, `tests/test_food_scenarios.py` F-1..F-3)
+    - `RUN_LIVE_LLM=1 pytest -q -s tests/test_food_scenarios.py -k live`
 - M5: not started.
 
 ## Oura data notes (observed in fixtures, 2026-10-07)
