@@ -80,7 +80,8 @@ def proposal(user, goal: dict, day: date, now: datetime, use_fixtures: bool) -> 
         target = answers(goal).get("target_time")
         finish = feasibility.predict_finish(runs, t.event.amount, target if isinstance(target, (int, float)) else None)
     db.update_goal(goal["id"], status="proposed", variant=variant, preview_json=a, asked_at=now.isoformat())
-    return messages.preview(t, variant, a, event, plan["days"], p, finish), a
+    note = messages.strength_short(plan["strength_short"], db.confirmed_direction_rules(user.id), p.days_per_week)
+    return messages.preview(t, variant, a, event, plan["days"], p, finish, note), a
 
 
 def _plain_error(error: str) -> str:

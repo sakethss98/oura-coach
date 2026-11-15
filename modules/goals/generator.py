@@ -47,6 +47,7 @@ class _Week:
         self.n, self.tweek, self.phase, self.anchor, self.previous = n, tweek, phase, anchor, previous
         self.rules, self.event = rules, event
         self.days: dict[date, list[dict]] = {}
+        self.time_short: list[dict] = []     # lifts dropped for time: what the day needed, what they have
 
     def window(self) -> list[date]:
         return [self.anchor - timedelta(days=6 - i) for i in range(7)]
@@ -197,6 +198,7 @@ def _fit_time(t: Template, profile: Profile, week: _Week) -> list[str]:
             lifts = [x for x in sessions if any(_matches(x, n) for n in t.shared.strength_types)]
             if lifts:
                 sessions.remove(lifts[-1])
+                week.time_short.append({"needed_min": round(total), "limit_min": limit})
                 dropped.append(f"{day:%a %b %-d}: {lifts[-1]['discipline']}.{lifts[-1]['type']} dropped "
                                f"(over their {limit} min)")
     return dropped
@@ -206,7 +208,8 @@ def generate(t: Template, variant: str, profile: Profile, start: date, event: da
              entry_week: int = 1, extra_weeks: int = 0, strength_per_week: dict[str, int] | None = None,
              skip_weeks: tuple[int, ...] = (), max_days: dict[str, int] | None = None) -> dict:
     """{"days": [{"date", "week" (the plan's week), "tweek" (the template's week), "phase", "anchor", "sessions"}],
-    "changes": [what code changed and why],
+    "changes": [what code changed and why], "strength_short": [{week, phase, wanted, placed, time}] for weeks
+    with fewer strength sessions than asked (time = {needed_min, limit_min} when a lift didn't fit their time),
     "errors": validate_plan's (non-empty = don't write it)}."""
     require_approved(t)
     template_weeks = t.variants[variant].weeks
@@ -217,7 +220,7 @@ def generate(t: Template, variant: str, profile: Profile, start: date, event: da
     discipline_days = max_days
     max_days = min(profile.days_per_week, t.shared.max_sessions_per_week)
     per_phase = {**t.shared.strength_per_week, **(strength_per_week or {})}
-    built, changes = [], []
+    built, changes, short = [], [], []
     for i, (w, anchor) in enumerate(zip(weeks, days_of)):
         week = _Week(i + 1, tweeks[i], w.phase, anchor, days_of[i - 1] if i else None, rules, event)
         for s in w.sessions:
@@ -226,9 +229,15 @@ def generate(t: Template, variant: str, profile: Profile, start: date, event: da
         changes += _drop_to_days(t, week, max_days)
         for discipline, most in (discipline_days or {}).items():
             changes += _cap_days(t, week, discipline, most)
-        changes += _place_strength(t, week, per_phase.get(w.phase, 0), max_days)
+        wanted = per_phase.get(w.phase, 0)
+        changes += _place_strength(t, week, wanted, max_days)
         changes += apply_limits(t, profile, week)
         changes += _fit_time(t, profile, week)
+        placed = sum(1 for xs in week.days.values() for x in xs
+                     if any(_matches(x, n) for n in t.shared.strength_types))
+        if placed < wanted:
+            short.append({"week": week.n, "phase": w.phase, "wanted": wanted, "placed": placed,
+                          "time": week.time_short[0] if week.time_short else None})
         built.append(week)
     days = []
     first = min(start, built[0].anchor - timedelta(days=6))
@@ -241,4 +250,5 @@ def generate(t: Template, variant: str, profile: Profile, start: date, event: da
         week = week_of.get(day) or next(w for w in built if w.anchor >= day)
         days.append({"date": day, "week": week.n, "tweek": week.tweek, "phase": week.phase,
                      "anchor": day == week.anchor, "sessions": list(week.days.get(day, [])) if day in week_of else []})
-    return {"days": days, "changes": changes, "errors": validate_plan(days, profile, t, variant)}
+    return {"days": days, "changes": changes, "strength_short": short,
+            "errors": validate_plan(days, profile, t, variant)}

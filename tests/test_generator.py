@@ -156,3 +156,20 @@ def test_at_most_n_run_days_a_week_drops_the_lightest_runs_first():
         assert len(run_days) <= 3
     assert len(sessions(result, "run.long")) == len(NOVICE_LONG_MI) + 1          # never the long run
     assert any("run.short (at most 3 run days)" in c for c in result["changes"])
+
+
+def test_too_little_time_for_the_lifts_a_rule_asks_is_said_with_the_reason_and_the_fixes():
+    from modules.goals.messages import strength_short
+    t = library.load("half_marathon")
+    p = profile(minutes_per_session=90, easy_pace=6.5)
+    a = assess(t, "novice", p.history, START, RACE, p.anchor_weekday)
+    result = generate(t, "novice", p, START, RACE, a["entry_week"], a["extra_weeks"],
+                      {"base": 2, "build": 2, "peak": 2})
+    assert result["errors"] == [] and result["strength_short"]
+    assert strength_short(result["strength_short"], {"strength_sessions_per_week": 2}, 6) == (
+        "Your rules ask for 2 lifts a week; 1 fits, because a run plus a lift needs about 92 min and you have 90. "
+        "More time on those days, or another training day, would fit both.")
+    assert strength_short(result["strength_short"], {}, 6) is None             # no rule: nothing to say
+    roomy = generate(t, "novice", profile(minutes_per_session=120), START, RACE, a["entry_week"], a["extra_weeks"],
+                     {"base": 2, "build": 2, "peak": 2})
+    assert strength_short(roomy["strength_short"], {"strength_sessions_per_week": 2}, 6) is None

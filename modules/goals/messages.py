@@ -46,7 +46,7 @@ def no_template(goal_text: str) -> str:
 
 
 def preview(t: Template, variant: str, a: dict, event: date | None, days: list[dict], profile,
-            finish: dict | None) -> str:
+            finish: dict | None, short_note: str | None = None) -> str:
     """The plan before they say yes."""
     longs = [x for d in days for x in d["sessions"] if t.session_type(x["discipline"], x["type"]).long]
     strength = sum(1 for d in days if d["phase"] == "build" for x in d["sessions"] if x["discipline"] == "strength")
@@ -71,8 +71,27 @@ def preview(t: Template, variant: str, a: dict, event: date | None, days: list[d
     elif finish is not None:
         lines.append("Not enough run data to predict a time yet. A run of 5 km or more with your watch or ring "
                      "on would let me.")
+    if short_note:
+        lines.append(short_note)
     lines.append("Set it up?")
     return "\n".join(lines)
+
+
+def strength_short(short: list[dict], rules: dict, days_per_week: int) -> str | None:
+    """When the plan has fewer lifts than a confirmed rule asks (in the weeks the rule covers), why and the two
+    ways to fix it. None when every week has them."""
+    wanted = rules.get("strength_sessions_per_week")
+    misses = [s for s in short if wanted and s["phase"] in ("base", "build", "peak") and s["placed"] < wanted]
+    if not misses:
+        return None
+    fewest = min(misses, key=lambda s: s["placed"])
+    head = f"Your rules ask for {int(wanted)} lifts a week; {fewest['placed']} fits"
+    timed = next((s["time"] for s in misses if s["time"]), None)
+    if timed:
+        return (f"{head}, because a run plus a lift needs about {timed['needed_min']} min and you have "
+                f"{timed['limit_min']}. More time on those days, or another training day, would fit both.")
+    return (f"{head}, because your {days_per_week} training days a week are full. Another training day, or more "
+            "time to add a lift after a run, would fit them.")
 
 
 def not_feasible(t: Template, a: dict, event: date | None) -> str:

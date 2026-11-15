@@ -443,3 +443,14 @@ def test_e_10_a_question_never_replaces_confirmed_direction_rules(coach, user, c
         call("set_direction_goal", text="hybrid athlete by December"), call("direction_check"),
         say("Not yet, going by your last 4 weeks (approximate); I can't measure lifts or muscle.")])
     assert db.confirmed_direction_rules(user.id) == {"strength_sessions_per_week": 2}
+
+
+def test_e_7_the_preview_says_when_the_lifts_a_rule_asks_dont_fit(coach, user, chat_model, runner):
+    d = db.add_direction(user.id, "a runner who lifts", {"strength_sessions_per_week": 2})
+    db.confirm_direction(d["id"], d["rules"])
+    goal = db.add_goal(user.id, "half marathon", "half_marathon", RACE, "setting_up")
+    for key, value in {**ANSWERS, "level": "some", "easy_pace": 6.5, "event_date": RACE.isoformat()}.items():
+        db.set_goal_answer(goal["id"], key, value, "user")
+    preview, _ = service.proposal(user, db.get_goal(goal["id"]), at(9).date(), at(9), True)
+    assert ("Your rules ask for 2 lifts a week; 1 fits, because a run plus a lift needs about 92 min and you have "
+            "90. More time on those days, or another training day, would fit both.\nSet it up?") in preview
