@@ -153,6 +153,7 @@ def run_case(case: dict, trial: int = 1, tag: str = "eval") -> dict:
     return {"id": case["id"], "trial": trial, "categories": case["categories"], "source": case.get("source"),
             "message": last["text"], "earlier": earlier, "reply": reply, "error": error,
             "routed": routed, "routing_hit": is_hit(routed, case["categories"]),
+            "final_route": state.get("categories") or routed,          # after code's additions (owners, programs)
             "tools": [r["name"] for r in results], "tool_results": json.loads(json.dumps(results, default=str)),
             "checks": graded, "passed": error is None and all(g["answer"] == "yes" for g in applicable),
             "latency_s": round(latency, 2), "coach": _usage(coach_rows), "judge": _usage(judge_rows),

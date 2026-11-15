@@ -45,17 +45,6 @@ BANNED = [
      "a phrase about the reply itself ('one line from me')"),
 ]
 
-# Offers of an action the coach has no tool for (searching, browsing, looking things up). Never allowed:
-# with a tool it should just use it, without one it should answer from what it knows.
-OFFERS = [
-    re.compile(r"\b(want|would you like|shall|should|do you want)\s+me\s+to\s+(look|search|check|browse|google|find)\b",
-               re.I),
-    re.compile(r"\bI\s+(can|could)\s+(search|browse|google|look\s+(it|that|this|them)?\s*up|check\s+online|"
-               r"find\s+out\s+online)\b", re.I),
-    re.compile(r"\bI['’]ll\s+(check|look|search)\s+(online|the\s+web|it\s+up|that\s+up)\b", re.I),
-    re.compile(r"\blet\s+me\s+(search|google|browse|look\s+(it|that|this)\s+up|check\s+online)\b", re.I),
-]
-
 # Offers to write something: (pattern, tools that could do it). Allowed only if one is offered this turn.
 _OFFER_ME = r"\b(?:want|would\s+you\s+like|shall|should|do\s+you\s+want)\s+me\s+to\s+"
 _OFFER_I = r"\bI(?:\s+can|['’]ll|\s+will|\s+could)\s+"
@@ -64,6 +53,22 @@ WRITE_OFFERS = [
     (re.compile(f"(?:{_OFFER_ME}|{_OFFER_I})(save|remember|note)\\b", re.I), {"remember", "save_body_weight", "save_limit"}),
     (re.compile(f"(?:{_OFFER_ME}|{_OFFER_I})plan around\\b", re.I), {"save_limit"}),
     (re.compile(f"(?:{_OFFER_ME}|{_OFFER_I})mark\\b", re.I), {"mark_done"}),
+]
+
+# Offers of an action no tool can do yet, each keyed to the tool that would make it possible: blocked unless
+# that tool is offered this turn, so an offer unblocks by itself the day the tool exists. (The tool names are the
+# contract: web_search for looking things up, set_reminder for reminders.)
+_REMIND = r"(?:remind|set\s+(?:up\s+)?a\s+reminder|send\s+(?:you\s+)?a\s+reminder)"
+OFFERS = [
+    (re.compile(r"\b(want|would you like|shall|should|do you want)\s+me\s+to\s+(look|search|check|browse|google|find)\b",
+                re.I), {"web_search"}),
+    (re.compile(r"\bI\s+(can|could)\s+(search|browse|google|look\s+(it|that|this|them)?\s*up|check\s+online|"
+                r"find\s+out\s+online)\b", re.I), {"web_search"}),
+    (re.compile(r"\bI['’]ll\s+(check|look|search)\s+(online|the\s+web|it\s+up|that\s+up)\b", re.I), {"web_search"}),
+    (re.compile(r"\blet\s+me\s+(search|google|browse|look\s+(it|that|this)\s+up|check\s+online)\b", re.I),
+     {"web_search"}),
+    (re.compile(f"(?:{_OFFER_ME}|{_OFFER_I}|\\b(?:should|shall|can)\\s+I\\s+){_REMIND}\\b", re.I), {"set_reminder"}),
+    (re.compile(r"\b(?:want|would\s+you\s+like|need)\s+a\s+reminder\b", re.I), {"set_reminder"}),
 ]
 
 _I = r"\bI(?:['’]ve|\s+have)?\s+(?:just\s+|already\s+|now\s+)?"
@@ -85,7 +90,8 @@ CLAIMS = [
     (re.compile(_I + r"marked\b", re.I), {"mark_done"}),
     (re.compile(_I_WILL + r"(remember|save|note)\b", re.I), {"remember", "save_body_weight"}),
     (re.compile(_I_WILL + r"log\b", re.I), {"log_food", "add_manual_workout"}),
-    (re.compile(_I_WILL + r"(resend|send|remind|check back|ping|follow up|text you|message you|get back|recalc\w*|"
+    (re.compile(_I_WILL + _REMIND + r"\b", re.I), {"set_reminder"}),       # true only when that tool ran
+    (re.compile(_I_WILL + r"(resend|send|check back|ping|follow up|text you|message you|get back|recalc\w*|"
                           r"calculate|work out|redo)\b", re.I), set()),
 ]
 
@@ -380,9 +386,9 @@ def _sentence_problems(sentence: str, tools_called: set[str], tools_offered: set
             if match and not (could & tools_offered):
                 problems.append(f'offers "{match.group(0).strip()}", but no tool for that is available now: '
                                 "don't offer it")
-    for pattern in OFFERS:
+    for pattern, could in OFFERS:
         match = pattern.search(sentence)
-        if match:
+        if match and not (could & (tools_offered or set())):
             problems.append(f'offers "{match.group(0).strip()}", which no tool can do: answer from what you know')
     for pattern, needs in CLAIMS:
         match = pattern.search(sentence)

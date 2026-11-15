@@ -230,6 +230,14 @@ def _waiting_for_training(t) -> list[str]:
     return notes
 
 
+def _program_active(t) -> bool:
+    """A goal program is running: "what's today's session?" means its session."""
+    if "goals" not in t.user.enabled_modules:
+        return False
+    goal = db.current_goal(t.user.id)
+    return bool(goal and goal["status"] == "active")
+
+
 def _waiting_for_goal(t) -> list[str]:
     """Notes for the classifier: a goal question waiting for their answer."""
     if "goals" not in t.user.enabled_modules:
@@ -270,6 +278,10 @@ def classify(state: AgentState, config) -> dict:
     if categories and training_notes and PENDING_OWNER not in categories and categories != ["off_topic"]:
         categories = categories + [PENDING_OWNER]
     if categories and goal_notes and GOAL_OWNER not in categories and categories != ["off_topic"]:
+        categories = categories + [GOAL_OWNER]
+    # With a program running, a training message also gets the program's skill: "what's today's session?" and "what's
+    # my plan today?" read alike to the classifier (examples and prompt lines only moved the misses around, 2026-11-15).
+    if "training" in categories and GOAL_OWNER not in categories and _program_active(t):
         categories = categories + [GOAL_OWNER]
     if _accepts_limit_offer(state["messages"]) and LIMIT_OWNER not in categories:
         categories = [LIMIT_OWNER] + [c for c in categories if c != "off_topic"]     # save_limit lives there

@@ -95,6 +95,15 @@ def test_e_3_and_e_11_todays_session_is_the_programs_run_then_strength(coach, us
                                                        "lower-body strength, 40 min." in reply
 
 
+def test_with_a_program_running_a_training_message_also_gets_the_programs_skill(coach, user, chat_model, runner):
+    chat = Chat(coach, user, chat_model)
+    chat.send("what's my plan today?", 9, 0, [say("Check in first.")])          # labeled training
+    assert "goal_status" not in chat_model.last_offered                           # no program: training alone
+    set_up(user, at(9).date() - timedelta(days=1))
+    chat.send("what's my plan today?", 9, 30, [say("Today is an easy run.")])
+    assert {"goal_today", "goal_status", "start_checkin"} <= set(chat_model.last_offered)
+
+
 def test_e_6_on_track_says_sessions_done_and_weeks_left(coach, user, chat_model, runner):
     set_up(user, at(9).date() - timedelta(days=17))
     reply = Chat(coach, user, chat_model).send("am I on track?", 9, 0, [call("goal_status"), say("")])

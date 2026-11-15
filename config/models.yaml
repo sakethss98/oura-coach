@@ -12,6 +12,7 @@ jobs:
   agent:                        # the chat agent and its rewrite of a reply that broke the rules
     provider: openai
     model: gpt-5-mini
+    params: {reasoning_effort: low}   # G3b (2026-11-15): 11.3 s vs 20.2 s a reply at the default, 82% vs 78% passed
   structured:                   # core/llm.structured_call: plan, food, check-in, meal, recipe ...
     provider: openai
     model: gpt-5-mini

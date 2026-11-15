@@ -1,3 +1,4 @@
+import pytest
 """The reply rules (core/reply_rules.py): limits, internal terms, first-person claims."""
 from core.reply_rules import MAX_WORDS, TurnFacts, enforce, topics, violations
 
@@ -309,3 +310,22 @@ def test_the_line_next_to_code_text_fits_the_words_left():
     text = "Go for it this afternoon. It's a strong hit, so skip it if you sleep early. Tea is gentler."
     assert fit_words(text, 25, 2) == "Go for it this afternoon. It's a strong hit, so skip it if you sleep early."
     assert fit_words(text, 50, 2) == "Go for it this afternoon."
+
+
+REHEARSAL = "Want me to remind you to check mileage or just go by how they feel?"   # seen in the demo rehearsal
+
+
+@pytest.mark.parametrize("text", [REHEARSAL, "I'll remind you to stretch tonight.", "I can set a reminder for 6am.",
+                                  "Should I send you a reminder before the run?", "Want a reminder on Friday?"])
+def test_a_reminder_is_never_offered_while_no_tool_can_set_one(text):
+    assert any("no tool can do" in p for p in violations(text, set(), {"log_food", "remember"}))
+    assert any("no tool can do" in p for p in violations(text, set(), None))
+
+
+def test_each_blocked_offer_unblocks_when_its_tool_exists_and_a_claim_needs_the_tool_to_run():
+    assert violations(REHEARSAL, set(), {"set_reminder"}) == []                  # the future tool is offered
+    assert violations("Want me to look it up?", set(), {"web_search"}) == []
+    assert violations("Want me to look it up?", set(), {"set_reminder"}) != []   # each offer has its own tool
+    claim = "I'll remind you tomorrow at 7."
+    assert any("claims" in p for p in violations(claim, set(), {"set_reminder"}))   # offered, not run: false claim
+    assert violations(claim, {"set_reminder"}, {"set_reminder"}) == []
