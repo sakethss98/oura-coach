@@ -118,7 +118,8 @@ def test_run_minutes_their_words_then_pace_then_longest_run():
     assert fueling.run_minutes(None, 10, runs) == (65, "10 km at your usual 6:30 per km")    # median pace
     assert fueling.run_minutes(None, None, runs) == (95, "your longest run in the last 4 weeks; tell me if it's longer")
     no_gps = [{"minutes": 37, "distance_km": 2.2}]                         # 17 min/km: not a usable pace
-    assert fueling.run_minutes(None, 10, no_gps) == (70, "10 km at about 7 min per km; no usable run pace from Oura")
+    assert fueling.run_minutes(None, 10, no_gps) == (None, "10 km, but I don't know your usual pace yet")   # no guess
+    assert fueling.run_minutes(None, 10, no_gps, asked_pace=6.5) == (65, "10 km at your usual 6:30 per km")
     assert fueling.run_minutes(None, None, [])[0] == fueling.TYPICAL_LONG_RUN_MIN
     assert fueling.run_minutes(None, 1, [{"minutes": 6.999, "distance_km": 1.0}])[1].endswith("7:00 per km")
 

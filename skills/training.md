@@ -7,7 +7,7 @@ examples:
   - "Give me a plan with a run followed by a weightlifting session."
   - "I ran 3 days in a row, should tomorrow be legs instead?"
 tools: [start_checkin, submit_checkin, plan_workout, confirm_override, explain_plan, get_today, refresh_health, workouts,
-        mark_done, add_manual_workout]
+        mark_done, add_manual_workout, goal_today]
 sources: [oura, calendar, plans, check-in]
 rubric:
   - {check: "A workout request got the check-in question or a plan from a tool, not a plan written by the model", by: code}

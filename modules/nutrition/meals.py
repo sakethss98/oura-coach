@@ -16,7 +16,7 @@ from core import db, memory
 from core.llm import load_prompt, structured_call
 from modules.nutrition.messages import format_meal_ideas, format_recipe
 from modules.nutrition.schemas import MealIdeas, Recipe
-from modules.nutrition.targets import daily_targets, dish_key, fallback_meal, meal_budget, remaining
+from modules.nutrition.targets import daily_targets, dish_key, fallback_meal, meal_budget, nutrition_settings, remaining
 from modules.training.baseline import food_totals
 import today   # the shared day view: food_on, recent_meal_ideas
 
@@ -36,7 +36,7 @@ def often_logged(user, now: datetime) -> list[str]:
 def _meal_size(user, day: date, now: datetime, use_fixtures: bool) -> dict | None:
     """One meal's share of what is left today (code math), or None without targets."""
     body = Health(use_fixtures).bundle(user, day, now=now, allow_stale=True)["body"]
-    targets = daily_targets(body, user.goals()["nutrition"])["targets"]
+    targets = daily_targets(body, nutrition_settings(user))["targets"]
     left = remaining(targets, food_totals(today.food_on(user, day)))
     size = meal_budget(targets, left, now)
     return {k: round(v) for k, v in size.items()} if size else None

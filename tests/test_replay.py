@@ -1781,14 +1781,25 @@ def test_m4_12_coffee_before_a_run_is_timed_and_sized_for_their_weight(coach, us
     assert "100–210 mg" in again and "using 70 kg" not in again                     # once per weight, not each time
 
 
-def test_m4_13_a_10k_drinks_to_thirst_and_says_there_is_no_weather_data(coach, user, chat_model):
+EASY_6K = ("running", "06:00", "06:39", 6000)          # 6 km in 39 min: a usable 6:30 per km
+
+
+def test_m4_13_a_10k_drinks_to_thirst_and_says_there_is_no_weather_data(coach, user, chat_model, patch_oura):
+    patch_oura(workouts=[EASY_6K])
     reply = Chat(coach, user, chat_model).send(ELECTROLYTES_QUESTION, 7, 0, [
         call("search_gssi", query="electrolytes sodium shorter runs", k=3),
         call("fueling_plan", distance_km=10, parts=["fluids"]),
         say("Drinking to thirst works well on shorter runs in mild weather [2], so for a 10k water is plenty.")])
-    assert reply.startswith("🏃 Run of 10 km · about 70 min (10 km at about 7 min per km; no usable run pace from Oura)\n"
+    assert reply.startswith("🏃 Run of 10 km · about 65 min (10 km at your usual 6:30 per km)\n"
                             "Drink: to thirst; water is fine")
     assert "no weather data" in reply and f"Source [2]: GSSI – Drinking (test) <{GSSI_URLS['drinking']}>" in reply
+
+
+def test_m4_13_without_a_usable_pace_it_asks_how_long_instead_of_guessing(coach, user, chat_model):
+    reply = Chat(coach, user, chat_model).send(ELECTROLYTES_QUESTION, 7, 0, [
+        call("fueling_plan", distance_km=10, parts=["fluids"]), say("")])
+    assert reply.startswith("🏃 Run of 10 km · I don't know your usual pace yet") and "how long" in reply
+    assert "7 min per km" not in reply and "Drink:" not in reply
 
 
 def test_m4_14_no_weight_means_per_kg_one_question_then_grams(coach, user, chat_model, patch_oura):
@@ -2077,7 +2088,8 @@ def test_live_m4_12_coffee_before_a_run(coach, user, knowledge):
 
 
 @live
-def test_live_m4_13_electrolytes_for_a_10k(coach, user, knowledge):
+def test_live_m4_13_electrolytes_for_a_10k(coach, user, knowledge, patch_oura):
+    patch_oura(workouts=[EASY_6K])
     chat = Chat(coach, user)
     reply = chat.send(ELECTROLYTES_QUESTION, 7, 0)
     chat.print("scenario M4-13: electrolytes for a 10k")
@@ -2175,6 +2187,22 @@ COVERAGE = {
     "M4-13": ("test_m4_13_a_10k_drinks_to_thirst_and_says_there_is_no_weather_data",
               "test_live_m4_13_electrolytes_for_a_10k"),
     "M4-14": ("test_m4_14_no_weight_means_per_kg_one_question_then_grams", "test_live_m4_14_asks_for_weight_once"),
+    "E-1": ("test_e_1_questions_two_at_a_time_then_the_plan_then_yes", "test_live_e_1_set_up_a_goal"),
+    "E-2": ("test_e_2_a_date_too_soon_gets_the_earliest_that_fits", "test_live_e_2_a_date_too_soon"),
+    "E-3": ("test_e_3_and_e_11_todays_session_is_the_programs_run_then_strength", "test_live_e_3_and_e_11_todays_session"),
+    "E-4": ("test_e_4_a_missed_long_run_is_moved_or_the_next_held", "test_live_e_4_e_5_e_6_on_track"),
+    "E-5": ("test_e_5_two_misses_in_a_week_repeat_that_week", "test_live_e_4_e_5_e_6_on_track"),
+    "E-6": ("test_e_6_on_track_says_sessions_done_and_weeks_left", "test_live_e_4_e_5_e_6_on_track"),
+    "E-7": ("test_e_7_a_direction_becomes_rules_they_confirm_and_the_plan_follows", "test_live_e_7_direction_goal"),
+    "E-8": ("test_two_strength_sessions_in_every_build_week_and_none_on_the_long_day", None),
+    "E-9": ("test_no_legs_two_days_before_or_the_day_after_a_long_run_and_legs_mid_week", None),
+    "E-10": ("test_e_10_direction_check_is_code_milestones_and_says_what_isnt_measured", "test_live_e_10_direction_check"),
+    "E-11": ("test_e_3_and_e_11_todays_session_is_the_programs_run_then_strength", "test_live_e_3_and_e_11_todays_session"),
+    "E-12": ("test_e_12_a_run_then_weights_takes_the_programs_run", "test_live_e_12_run_then_weights_on_a_program_day"),
+    "E-13": ("test_e_13_a_slower_5k_makes_the_target_a_stretch", "test_live_e_13_target_time"),
+    "E-14": ("test_e_14_a_knee_limit_is_saved_on_yes_and_the_next_plan_has_no_run", "test_live_e_14_knee_limit"),
+    "E-15": ("test_e_15_no_wearable_asks_their_pace_and_still_plans", "test_live_e_15_no_wearable"),
+    "E-16": ("test_a_drafted_35_percent_template_never_makes_a_plan_and_pending_review_never_does", None),
 }
 
 
@@ -2183,10 +2211,15 @@ def _marks(test) -> set[str]:
 
 
 def test_every_scenario_in_the_doc_has_a_scripted_and_a_live_test():
-    ids = re.findall(r"^- \*\*([0-9]+[a-z]?|M4-\d+[a-z]?)\b", SCENARIOS_DOC.read_text(), re.M)
+    text = SCENARIOS_DOC.read_text()
+    ids = re.findall(r"^- \*\*([0-9]+[a-z]?|M4-\d+[a-z]?|E-\d+[a-z]?)\b", text, re.M)
     assert sorted(ids) == sorted(COVERAGE), set(ids) ^ set(COVERAGE)
-    tests = globals()
+    code_only = set(re.findall(r"^- \*\*(E-\d+[a-z]?)\*\* \(code only\)", text, re.M))
+    from tests import test_generator, test_goal_scenarios, test_program_validate
+    tests = {**vars(test_generator), **vars(test_program_validate), **vars(test_goal_scenarios), **globals()}
     for scenario, (scripted, live_name) in COVERAGE.items():
-        live_test = tests[live_name]
-        assert "live_llm" in _marks(live_test), scenario
         assert scripted in tests and "live_llm" not in _marks(tests[scripted]), scenario
+        if scenario in code_only:                   # an engine test: no model involved, so no live run
+            assert live_name is None, scenario
+            continue
+        assert "live_llm" in _marks(tests[live_name]), scenario

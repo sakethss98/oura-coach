@@ -165,6 +165,8 @@ def _policy_ctx(state: CoachState) -> dict:
         "recent_food": c["recent_food"],
         "recent_food_caps": state["goals"]["recent_food_caps"],
         "context_caps": c.get("context_caps", []),
+        "limits": c.get("limits", []),
+        "split_day": c.get("next_split_day"),
         "window": c["window"],
     }
 

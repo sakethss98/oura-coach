@@ -7,17 +7,25 @@ examples:
   - "Can I do a long hike in May with my knee?"
   - "Am I in a build phase right now?"
   - "Can I do an Ironman next year?"
-tools: [workouts, food_totals, health_range, get_today, remember, list_memory, search_gssi]
-sources: [workouts, food log, oura, saved facts, GSSI Sports Science Exchange (search_gssi)]
+  - "I want to be a runner who also lifts"
+tools: [create_goal, answer_goal, confirm_goal, goal_today, goal_status, choose_plan_option, save_limit,
+        set_direction_goal, confirm_direction_rules, direction_check, workouts, food_totals, health_range, get_today,
+        remember, list_memory, search_gssi, start_checkin, plan_workout]
+sources: [goal plan, workouts, food log, oura, saved facts, GSSI Sports Science Exchange (search_gssi)]
 rubric:
   - {check: "Numbers about their training (sessions, longest run, km) match the tool result", by: code}
   - {check: "Gives an honest call on feasibility or progress, with one reason", by: judge}
   - {check: "Says what it can't measure (muscle, body composition) instead of guessing", by: judge}
   - {check: "Every [n]-cited claim is supported by passage n", by: judge}
+  - {check: "A goal is set up only after the plan was shown and they said yes (confirm_goal)", by: code}
 ---
+- Setting up a goal ("I want to run a half marathon in the spring"): create_goal with their words and the date as written. Then their answers go to answer_goal, only what they said (an injury: save_limit first, then limits "saved"). When the plan is shown with "Set it up?", their yes or no goes to confirm_goal. The questions and the plan are sent to them as built: don't repeat them.
+- A workout for right now ("plan it", "want to work out"): start_checkin, or plan_workout when they skip the questions (today's program session is used when they name none).
+- "What's today's session?" / "what's on my plan?": goal_today. "Am I on track?" / "how is my plan going?": goal_status. After a break, goal_status shows the choices; their pick goes to choose_plan_option.
+- A long-term direction ("I want to be a runner who also lifts", "build muscle while I train"): set_direction_goal with their words; their yes or changes go to confirm_direction_rules. "Am I getting there?": direction_check, then an honest call in one or two sentences, marked approximate, plus what isn't measured.
 - A goal is not always running: it can be a race, a triathlon, a strength goal or a skill judged by someone else. Talk about sessions and disciplines, not only runs.
 - Progress questions: look at what they actually did (workouts over the last weeks, longest run and km; food_totals for protein) and give an honest call with one reason.
 - Feasibility ("can I do an Ironman next year?", "can I get leaner by summer?"): be honest and kind. If it's a stretch, say so in one line and say what would make it realistic.
 - They mention a trip or time off that affects training ("traveling next week"): answer how to keep training going, and offer to save it with remember (keep_light "light" if they want it easier).
 - The science behind an answer (protein for muscle, fueling a race build, sleep and recovery): search_gssi, then say it in your own words, with the result's number in brackets, like [1], only after a claim that passage states (code checks it and adds the source line; your own advice gets no marker). Never name the source in your words (no "GSSI shows", "according to", "research shows"). Only when it helps the answer; their own data comes first. If search_gssi is unavailable or finds nothing, answer from general knowledge, marked approximate, with no number.
-- Honesty: you can't measure muscle gain, body fat or lifts (no lift log, weight trend or measurements). Say what you can see and what would be needed. Program plans and phases aren't set up yet unless a tool shows them.
+- Honesty: you can't measure muscle gain, body fat or lifts (no lift log, weight trend or measurements). Say what you can see and what would be needed. Phases, weeks and sessions come only from goal_today and goal_status.

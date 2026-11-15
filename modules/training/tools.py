@@ -49,6 +49,32 @@ def _sync(t, refresh: bool = False) -> dict:
     return bundle
 
 
+RUN_TYPES = {"easy_run", "long_run"}
+
+
+def _program_request(t) -> list[dict] | None:
+    """Today's session from their goal plan as request blocks, when the goals module is on (else None)."""
+    if "goals" not in t.user.enabled_modules:
+        return None
+    from modules.goals import service      # imported here: the training module works without goals
+    return service.today_request(t.user, t.day)
+
+
+def _with_program(request: list[dict] | None, program: list[dict] | None) -> list[dict] | None:
+    """Their request, or the program's session when they named none. A run they asked for without minutes on a
+    program day takes the program's run ("a run then weights" = today's easy run, then strength)."""
+    if not request:
+        return program
+    runs = [b for b in program or [] if b["workout_type"] in RUN_TYPES]
+    out = []
+    for b in request:
+        if b["workout_type"] in RUN_TYPES and not b.get("duration_min") and runs:
+            out.append(dict(runs[0]))
+        else:
+            out.append(b)
+    return out
+
+
 def _plan_reply(state: dict) -> tuple[str, dict]:
     if state.get("consult"):
         return ("Question sent to them as is: the rules would change what they asked for; their yes or no "
@@ -89,6 +115,7 @@ def submit_checkin(answer: str, config: RunnableConfig) -> tuple[str, dict]:
         parsed = checkin.parse(answer, request_text, t.user.id)
     except checkin.CheckinError as e:
         return as_json({"planned": False, "reason": str(e)}), {}
+    parsed["request"] = _with_program(parsed["request"], _program_request(t))
     answered = parsed["energy"] is not None or parsed["soreness"] is not None
     answer_ = {k: parsed[k] for k in ("energy", "soreness", "note", "constraints")}
     answer_["label"] = "just now" if answered else "skipped"
@@ -109,6 +136,7 @@ def plan_workout(request: str | None, config: RunnableConfig) -> tuple[str, dict
     else:
         answer = {**SKIPPED, "note": request}
     blocks = checkin.parse("", request, t.user.id)["request"] if request else None
+    blocks = _with_program(blocks, _program_request(t))
     return _plan_reply(planner.run_plan(PLANNER, t.user, t.now, t.use_fixtures, answer, request=blocks))
 
 

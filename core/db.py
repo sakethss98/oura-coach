@@ -208,6 +208,83 @@ CREATE TABLE IF NOT EXISTS questions_asked (
     PRIMARY KEY (user_id, question)
 );
 
+-- Goal programs (modules/goals): a goal, the answers it was built from, its days, and every change to them.
+CREATE TABLE IF NOT EXISTS goals (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id       INTEGER NOT NULL,
+    text          TEXT NOT NULL,           -- the goal in their own words
+    template      TEXT,                    -- programs/library/<name>.yaml, NULL when none fits
+    variant       TEXT,
+    event_date    TEXT,                    -- YYYY-MM-DD, NULL for an undated goal
+    status        TEXT NOT NULL,           -- setting_up / proposed / active / not_feasible / ended
+    preview_json  TEXT,                    -- feasibility + what the plan would be, shown before they say yes
+    asked_at      TEXT,                    -- when the "set it up?" question was sent
+    options_json  TEXT,                    -- when an adjustment no longer fits: the options code found
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS goal_answers (
+    goal_id     INTEGER NOT NULL,
+    key         TEXT NOT NULL,
+    value       TEXT,                      -- JSON
+    source      TEXT NOT NULL,             -- user / data
+    updated_at  TEXT NOT NULL,
+    PRIMARY KEY (goal_id, key)
+);
+
+CREATE TABLE IF NOT EXISTS program_days (
+    goal_id        INTEGER NOT NULL,
+    date           TEXT NOT NULL,
+    week           INTEGER NOT NULL,       -- the plan's week
+    tweek          INTEGER NOT NULL,       -- the template's week
+    phase          TEXT NOT NULL,
+    anchor         INTEGER NOT NULL,       -- 1 = the week's long-session (or event) day
+    sessions_json  TEXT NOT NULL,          -- [{discipline, type, amount, minutes, intensity, status, ...}]
+    PRIMARY KEY (goal_id, date)
+);
+
+CREATE TABLE IF NOT EXISTS program_adjustments (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    goal_id     INTEGER NOT NULL,
+    day         TEXT NOT NULL,
+    kind        TEXT NOT NULL,             -- dropped / moved / held / repeat / skipped
+    reason      TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
+
+-- Injuries and limits, structured (programs/profile.Limit): the generator and policy_check read them.
+CREATE TABLE IF NOT EXISTS limits (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id        INTEGER NOT NULL,
+    body_area      TEXT NOT NULL,
+    kind           TEXT NOT NULL,          -- pain / injury / condition
+    avoid_json     TEXT NOT NULL,          -- movements from config/movements.yaml
+    intensity_cap  INTEGER,
+    start_date     TEXT,
+    end_date       TEXT,                   -- NULL = until they say it's better
+    created_at     TEXT NOT NULL,
+    ended_at       TEXT
+);
+
+-- A long-term direction ("run and lift together") and the rules it became, from config/direction_rules.yaml.
+CREATE TABLE IF NOT EXISTS direction_goals (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL,
+    text        TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    ended_at    TEXT
+);
+
+CREATE TABLE IF NOT EXISTS direction_rules (
+    direction_id  INTEGER NOT NULL,
+    key           TEXT NOT NULL,
+    value_json    TEXT NOT NULL,
+    proposed_at   TEXT NOT NULL,
+    confirmed_at  TEXT,                    -- only confirmed rules are read
+    PRIMARY KEY (direction_id, key)
+);
+
 CREATE TABLE IF NOT EXISTS runs (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id      INTEGER,
@@ -244,7 +321,7 @@ FOOD_FIELDS = ["entry_type", "est_protein_g", "est_fiber_g", "est_carbs_g", "est
 # What user 1 starts with. goals.yaml stays the source of their training and nutrition numbers.
 DEFAULT_SETTINGS = {
     "timezone": "America/Chicago",
-    "enabled_modules": ["training", "nutrition"],
+    "enabled_modules": ["training", "nutrition", "goals"],
     "goal_template": "endurance_body_comp",
     "goal_rigor": "moderate",
     "score_cutoff": "21:00",
@@ -427,12 +504,15 @@ def _m4_steps(conn) -> list[str]:
         steps.append("runs.job/tokens/latency")
     if "context_notes" in tables:
         steps.append("drop context_notes")
+    if "users" in tables and "goals" not in tables:
+        steps.append("enable goals for user 1")
     return steps
 
 
-def _m4_migrate(conn) -> None:
+def _m4_migrate(conn, steps: list[str]) -> None:
     """M3.2 -> M4: memory gains intensity_cap, runs gains job/tokens/latency; context_notes is dropped once every still-active note is
-    in memory (aborts otherwise, so no note is lost). Runs after SCHEMA, guarded step by step."""
+    in memory (aborts otherwise, so no note is lost); user 1 gets the goals module the first time the goal tables
+    appear. Runs after SCHEMA, guarded step by step (`steps` = what _m4_steps found before the schema ran)."""
     if "intensity_cap" not in _columns(conn, "memory"):
         conn.execute("ALTER TABLE memory ADD COLUMN intensity_cap INTEGER")
     runs = _columns(conn, "runs")
@@ -448,6 +528,13 @@ def _m4_migrate(conn) -> None:
         if missing:
             raise RuntimeError(f"{missing} active context note(s) are not in memory; context_notes was not dropped.")
         conn.execute("DROP TABLE context_notes")
+    if "enable goals for user 1" in steps:       # once, when the goal tables first appear (Part E)
+        row = conn.execute("SELECT enabled_modules FROM user_settings WHERE user_id = 1").fetchone()
+        if row:
+            modules = json.loads(row["enabled_modules"])
+            if "goals" not in modules:
+                conn.execute("UPDATE user_settings SET enabled_modules = ? WHERE user_id = 1",
+                             (json.dumps(modules + ["goals"]),))
 
 
 def _run_schema(conn) -> None:
@@ -469,6 +556,7 @@ def init_db() -> None:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("BEGIN")
         try:
+            m4_steps = _m4_steps(conn)          # before the schema creates the new tables
             if migrate:
                 food_before = _count(conn, "food_log")
                 _legacy_to_m31(conn)
@@ -477,7 +565,7 @@ def init_db() -> None:
             _run_schema(conn)
             if migrate:
                 _m31_copy_rows(conn)
-            _m4_migrate(conn)
+            _m4_migrate(conn, m4_steps)
             _seed_first_user(conn)
             if migrate:
                 food_after = _count(conn, "food_log")
@@ -1121,3 +1209,178 @@ def log_run(kind: str, model: str, input_data, output_data, user_id: int | None 
 def recent_runs(limit: int = 5) -> list[sqlite3.Row]:
     with connect() as conn:
         return conn.execute("SELECT * FROM runs ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+
+
+# --- goal programs (modules/goals) ------------------------------------------------------------------------
+
+def _goal(row) -> dict | None:
+    if row is None:
+        return None
+    g = dict(row)
+    for key in ("preview_json", "options_json"):
+        g[key] = json.loads(g[key]) if g[key] else None
+    return g
+
+
+def add_goal(user_id: int, text: str, template: str | None, event_date: date | None, status: str) -> dict:
+    now = _now()
+    with connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO goals (user_id, text, template, event_date, status, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (user_id, text, template, event_date.isoformat() if event_date else None, status, now, now))
+    return get_goal(cur.lastrowid)
+
+
+def get_goal(goal_id: int) -> dict | None:
+    with connect() as conn:
+        return _goal(conn.execute("SELECT * FROM goals WHERE id = ?", (goal_id,)).fetchone())
+
+
+def current_goal(user_id: int) -> dict | None:
+    """Their latest goal that hasn't ended (setting up, proposed, active or not feasible)."""
+    with connect() as conn:
+        return _goal(conn.execute("SELECT * FROM goals WHERE user_id = ? AND status != 'ended' ORDER BY id DESC "
+                                  "LIMIT 1", (user_id,)).fetchone())
+
+
+def update_goal(goal_id: int, **fields) -> dict:
+    for key in ("preview_json", "options_json"):
+        if key in fields and fields[key] is not None:
+            fields[key] = json.dumps(fields[key], default=str)
+    if isinstance(fields.get("event_date"), date):
+        fields["event_date"] = fields["event_date"].isoformat()
+    fields["updated_at"] = _now()
+    with connect() as conn:
+        conn.execute(f"UPDATE goals SET {', '.join(f'{k} = ?' for k in fields)} WHERE id = ?",
+                     (*fields.values(), goal_id))
+    return get_goal(goal_id)
+
+
+def end_goals(user_id: int) -> None:
+    with connect() as conn:
+        conn.execute("UPDATE goals SET status = 'ended', updated_at = ? WHERE user_id = ? AND status != 'ended'",
+                     (_now(), user_id))
+
+
+def set_goal_answer(goal_id: int, key: str, value, source: str) -> None:
+    with connect() as conn:
+        conn.execute("INSERT INTO goal_answers (goal_id, key, value, source, updated_at) VALUES (?, ?, ?, ?, ?) "
+                     "ON CONFLICT (goal_id, key) DO UPDATE SET value = excluded.value, source = excluded.source, "
+                     "updated_at = excluded.updated_at", (goal_id, key, json.dumps(value, default=str), source, _now()))
+
+
+def goal_answers(goal_id: int) -> dict[str, dict]:
+    """{key: {"value", "source"}}"""
+    with connect() as conn:
+        rows = conn.execute("SELECT * FROM goal_answers WHERE goal_id = ?", (goal_id,)).fetchall()
+    return {r["key"]: {"value": json.loads(r["value"]), "source": r["source"]} for r in rows}
+
+
+def save_program_days(goal_id: int, days: list[dict]) -> None:
+    """Replace the goal's days with these (the generator's or adjust's days)."""
+    with connect() as conn:
+        conn.execute("DELETE FROM program_days WHERE goal_id = ?", (goal_id,))
+        conn.executemany(
+            "INSERT INTO program_days (goal_id, date, week, tweek, phase, anchor, sessions_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [(goal_id, d["date"].isoformat(), d["week"], d["tweek"], d["phase"], int(bool(d["anchor"])),
+              json.dumps(d["sessions"], default=str)) for d in days])
+
+
+def program_days(goal_id: int) -> list[dict]:
+    with connect() as conn:
+        rows = conn.execute("SELECT * FROM program_days WHERE goal_id = ? ORDER BY date", (goal_id,)).fetchall()
+    return [{"date": date.fromisoformat(r["date"]), "week": r["week"], "tweek": r["tweek"], "phase": r["phase"],
+             "anchor": bool(r["anchor"]), "sessions": json.loads(r["sessions_json"])} for r in rows]
+
+
+def add_program_adjustments(goal_id: int, changes: list[dict]) -> None:
+    with connect() as conn:
+        conn.executemany("INSERT INTO program_adjustments (goal_id, day, kind, reason, created_at) VALUES (?, ?, ?, ?, ?)",
+                         [(goal_id, str(c["day"]), c["kind"], c["reason"], _stamp()) for c in changes])
+
+
+def program_adjustments(goal_id: int) -> list[dict]:
+    with connect() as conn:
+        return [dict(r) for r in conn.execute("SELECT * FROM program_adjustments WHERE goal_id = ? ORDER BY id",
+                                              (goal_id,)).fetchall()]
+
+
+def add_limit(user_id: int, body_area: str, kind: str, avoid: list[str], intensity_cap: int | None,
+              start_date: date | None, end_date: date | None) -> dict:
+    with connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO limits (user_id, body_area, kind, avoid_json, intensity_cap, start_date, end_date, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (user_id, body_area, kind, json.dumps(avoid), intensity_cap,
+             start_date.isoformat() if start_date else None, end_date.isoformat() if end_date else None, _stamp()))
+        row = conn.execute("SELECT * FROM limits WHERE id = ?", (cur.lastrowid,)).fetchone()
+    return _limit(row)
+
+
+def _limit(row) -> dict:
+    d = dict(row)
+    d["avoid"] = json.loads(d.pop("avoid_json"))
+    return d
+
+
+def active_limits(user_id: int, day: date | None = None) -> list[dict]:
+    """Limits not ended; with `day`, only those covering it."""
+    with connect() as conn:
+        rows = conn.execute("SELECT * FROM limits WHERE user_id = ? AND ended_at IS NULL ORDER BY id",
+                            (user_id,)).fetchall()
+    found = [_limit(r) for r in rows]
+    if day is not None:
+        d = day.isoformat()
+        found = [x for x in found if (not x["start_date"] or x["start_date"] <= d)
+                 and (not x["end_date"] or x["end_date"] >= d)]
+    return found
+
+
+def end_limits(user_id: int, limit_ids: list[int]) -> list[dict]:
+    with connect() as conn:
+        marks = ", ".join("?" * len(limit_ids))
+        conn.execute(f"UPDATE limits SET ended_at = ? WHERE user_id = ? AND id IN ({marks})",
+                     (_stamp(), user_id, *limit_ids))
+        rows = conn.execute(f"SELECT * FROM limits WHERE user_id = ? AND id IN ({marks})",
+                            (user_id, *limit_ids)).fetchall()
+    return [_limit(r) for r in rows]
+
+
+def add_direction(user_id: int, text: str, rules: dict) -> dict:
+    """A new direction goal (an earlier one ends) with its proposed, unconfirmed rules."""
+    now = _stamp()
+    with connect() as conn:
+        conn.execute("UPDATE direction_goals SET ended_at = ? WHERE user_id = ? AND ended_at IS NULL", (now, user_id))
+        cur = conn.execute("INSERT INTO direction_goals (user_id, text, created_at) VALUES (?, ?, ?)",
+                           (user_id, text, now))
+        conn.executemany("INSERT INTO direction_rules (direction_id, key, value_json, proposed_at) VALUES (?, ?, ?, ?)",
+                         [(cur.lastrowid, k, json.dumps(v), now) for k, v in rules.items()])
+    return current_direction(user_id)
+
+
+def current_direction(user_id: int) -> dict | None:
+    """{"id", "text", "rules": {key: value}, "confirmed": bool} for their direction goal, or None."""
+    with connect() as conn:
+        goal = conn.execute("SELECT * FROM direction_goals WHERE user_id = ? AND ended_at IS NULL ORDER BY id DESC "
+                            "LIMIT 1", (user_id,)).fetchone()
+        if goal is None:
+            return None
+        rows = conn.execute("SELECT * FROM direction_rules WHERE direction_id = ?", (goal["id"],)).fetchall()
+    return {"id": goal["id"], "text": goal["text"], "rules": {r["key"]: json.loads(r["value_json"]) for r in rows},
+            "confirmed": bool(rows) and all(r["confirmed_at"] for r in rows)}
+
+
+def confirm_direction(direction_id: int, rules: dict) -> None:
+    """Save the rules as confirmed (after their one round of edits)."""
+    now = _stamp()
+    with connect() as conn:
+        conn.execute("DELETE FROM direction_rules WHERE direction_id = ?", (direction_id,))
+        conn.executemany("INSERT INTO direction_rules (direction_id, key, value_json, proposed_at, confirmed_at) "
+                         "VALUES (?, ?, ?, ?, ?)", [(direction_id, k, json.dumps(v), now, now) for k, v in rules.items()])
+
+
+def confirmed_direction_rules(user_id: int) -> dict:
+    d = current_direction(user_id)
+    return d["rules"] if d and d["confirmed"] else {}

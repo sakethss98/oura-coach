@@ -21,6 +21,17 @@ TARGET_KEYS = ["calories", "protein_g", "carbs_g", "fat_g", "fiber_g"]
 SEX_OFFSET = {"male": 5, "female": -161}
 
 
+def nutrition_settings(user) -> dict:
+    """goals.yaml `nutrition`, with protein from a confirmed direction rule (modules/goals) when they have one;
+    calories never change."""
+    from core import db
+    settings = dict(user.goals()["nutrition"])
+    rules = db.confirmed_direction_rules(user.id) if "goals" in user.enabled_modules else {}
+    if "protein_g_per_kg" in rules:
+        settings["protein_g_per_kg"] = rules["protein_g_per_kg"]
+    return settings
+
+
 def daily_targets(body: dict, goals_nutrition: dict) -> dict:
     """{"targets": {...} or None, "inputs": {...}, "reason": str | None}."""
     weight = goals_nutrition.get("weight_kg") or body.get("weight_kg")

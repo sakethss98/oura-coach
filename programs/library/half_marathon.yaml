@@ -25,24 +25,24 @@ disciplines:
     measure: km
     kinds: [run]
     session_types:
-      easy:      {intensity: 3, pace: easy, movements: [running_impact]}
-      short:     {intensity: 2, pace: easy, movements: [running_impact]}
-      pace:      {intensity: 3, pace: race, movements: [running_impact]}
-      long:      {intensity: 4, hard: true, long: true, pace: easy, movements: [running_impact]}
-      race_test: {intensity: 5, hard: true, pace: race, movements: [running_impact]}    # Higdon's 5K / 10K
-      race:      {intensity: 5, hard: true, event: true, pace: race, movements: [running_impact]}
+      easy: {label: easy run, plan_as: easy_run, intensity: 3, pace: easy, movements: [running_impact]}
+      short: {label: short easy run, plan_as: easy_run, intensity: 2, pace: easy, movements: [running_impact]}
+      pace: {label: run at goal race pace, plan_as: easy_run, intensity: 3, pace: race, movements: [running_impact]}
+      long: {label: long run, plan_as: long_run, intensity: 4, hard: true, long: true, pace: easy, movements: [running_impact]}
+      race_test: {label: test race, plan_as: easy_run, intensity: 5, hard: true, pace: race, movements: [running_impact]}    # Higdon's 5K / 10K
+      race: {label: the race, intensity: 5, hard: true, event: true, pace: race, movements: [running_impact]}
     alternatives: {easy: cross.cross, short: cross.cross, pace: cross.cross, long: cross.cross}
   cross:
     measure: min
     kinds: [cycle, swim, walk, hike, yoga, mobility, other]
     session_types:
-      cross: {intensity: 2, recovery: true}     # Higdon: cross-training days are easy days to recover
+      cross: {label: cross-training, plan_as: walk, intensity: 2, recovery: true}     # Higdon: cross-training days are easy days to recover
   strength:
     measure: min
     kinds: [strength]
     session_types:
-      lower: {intensity: 3, default_min: 40, movements: [deep_knee_bend, spinal_load]}
-      upper: {intensity: 3, default_min: 40, movements: [overhead, grip]}
+      lower: {label: lower-body strength, plan_as: strength, intensity: 3, default_min: 40, movements: [deep_knee_bend, spinal_load]}
+      upper: {label: upper-body strength, plan_as: strength, intensity: 3, default_min: 40, movements: [overhead, grip]}
     alternatives: {lower: strength.upper}
 
 shared:

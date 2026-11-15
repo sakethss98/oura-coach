@@ -9,7 +9,7 @@ from core import db
 from core.day import bounds_of_days, day_bounds
 from modules.base import NudgeSpec, ScoreComponent
 from modules.nutrition.score import is_after_cutoff, load_rules, score_day
-from modules.nutrition.targets import daily_targets
+from modules.nutrition.targets import daily_targets, nutrition_settings
 from modules.training.baseline import food_totals
 
 
@@ -42,7 +42,7 @@ class NutritionModule:
     def score(self, user, day: date, now: datetime | None = None) -> ScoreComponent:
         """Protein, calories and meals against the day's targets (modules/nutrition/score.py)."""
         body = (self.health or Health()).bundle(user, day, now=now, allow_stale=True)["body"]
-        targets = daily_targets(body, user.goals()["nutrition"])["targets"]
+        targets = daily_targets(body, nutrition_settings(user))["targets"]
         entries = db.food_between(user.id, *day_bounds(user, day))
         return score_day(entries, targets, load_rules(), user.goal_rigor, is_after_cutoff(user, day, now))
 

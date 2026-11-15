@@ -24,8 +24,12 @@ MAX_LINES = 3
 MAX_WORDS = 60
 COPY_WORDS = 12
 
-# Blame words: never about the person ("bad" is left out: "a bad night" is about the night, not them).
-GUILT = re.compile(r"\b(missed|failed|should\s+have|lazy|behind)\b", re.I)
+# Blame aimed at the person ("you missed", "you're behind", "you should have", "lazy"). Never "bad": "a bad night"
+# is about the night. "Missed" and "behind" about sessions and numbers are fine ("Moved the long run you missed
+# to Saturday.", "2 km behind last week"): only a sentence that opens on them is blame.
+GUILT = re.compile(r"(?:^|[.!?;:—]\s*|,\s+|\b(?:and|but|so)\s+)(?:you|you've|you have|you'?re|you are)\s+"
+                   r"(?:\w+\s+)?(?:missed|failed|fallen\s+behind|falling\s+behind|behind|slack\w*)\b"
+                   r"|\byou\s+should(?:n'?t)?\s+have\b|\blazy\b|\bslacking\b", re.I)
 
 BANNED = [
     (re.compile(r"\bbands?\b", re.I), "the word 'band'"),
@@ -36,7 +40,7 @@ BANNED = [
     (re.compile(r"\b[a-z]+_[a-z0-9_]+\b"), "a snake_case term"),
     (re.compile(r"\banything else\b", re.I), "an extra offer ('anything else')"),
     (re.compile(r"\boverrides?\b", re.I), "the word 'override'"),
-    (GUILT, "a guilt word (missed, failed, should have, behind)"),
+    (GUILT, "blame aimed at them (you missed, you failed, you should have, you're behind)"),
     (re.compile(r"\b(one|a|my)\s+(short\s+|quick\s+)?(line|sentence|note)\s+from\s+me\b|\bmy\s+own\s+line\b", re.I),
      "a phrase about the reply itself ('one line from me')"),
 ]
@@ -57,7 +61,8 @@ _OFFER_ME = r"\b(?:want|would\s+you\s+like|shall|should|do\s+you\s+want)\s+me\s+
 _OFFER_I = r"\bI(?:\s+can|['’]ll|\s+will|\s+could)\s+"
 WRITE_OFFERS = [
     (re.compile(f"(?:{_OFFER_ME}|{_OFFER_I})(add|log|record|track)\\b", re.I), {"log_food", "add_manual_workout"}),
-    (re.compile(f"(?:{_OFFER_ME}|{_OFFER_I})(save|remember|note)\\b", re.I), {"remember", "save_body_weight"}),
+    (re.compile(f"(?:{_OFFER_ME}|{_OFFER_I})(save|remember|note)\\b", re.I), {"remember", "save_body_weight", "save_limit"}),
+    (re.compile(f"(?:{_OFFER_ME}|{_OFFER_I})plan around\\b", re.I), {"save_limit"}),
     (re.compile(f"(?:{_OFFER_ME}|{_OFFER_I})mark\\b", re.I), {"mark_done"}),
 ]
 
@@ -66,7 +71,14 @@ _I_WILL = r"\bI(?:['’]ll|\s+will)\s+"
 # (pattern, tools that make the claim true). An empty set means the claim is never allowed.
 CLAIMS = [
     (re.compile(_I + r"(logged|saved|added|recorded|noted|stored)\b", re.I),
-     {"log_food", "remember", "add_manual_workout", "save_body_weight"}),
+     {"log_food", "remember", "add_manual_workout", "save_body_weight", "save_limit", "confirm_goal",
+      "confirm_direction_rules", "create_goal", "answer_goal"}),
+    (re.compile(r"(?:^|[—–-]\s*)saved\b", re.I),          # "Saved your 10k for May 3", "Nice—saved: 5 days"
+     {"remember", "save_body_weight", "save_limit", "confirm_direction_rules", "create_goal", "answer_goal",
+      "confirm_goal", "log_food", "add_manual_workout"}),
+    (re.compile(_I_WILL + r"(plan around|work around|keep (it|that|this) in mind|avoid|(swap|replace|pause)\s+"
+                          r"(your\s+)?(runs?|running|workouts?|sessions?))\b", re.I),
+     {"save_limit", "remember"}),
     (re.compile(_I + r"(removed|deleted|cleared|forgotten|forgot)\b", re.I), {"remove_food", "forget"}),
     (re.compile(_I + r"(updated|changed|edited|corrected|fixed)\b", re.I), {"edit_food"}),
     (re.compile(_I + r"(synced|refreshed|pulled|fetched)\b", re.I), {"refresh_health"}),

@@ -78,3 +78,15 @@ def test_recent_food_minutes_ago():
     result = recent_food([entry(500, 20), entry(100, 5, timestamp="2026-10-07T10:00:00-05:00")], now)
     assert result == [{"minutes_ago": 60, "calories": 500, "text": "x"}]   # future entry left out
 
+
+
+def test_a_confirmed_protein_rule_sets_protein_and_never_calories(user):
+    from core import db
+    from modules.nutrition.targets import nutrition_settings
+    before = nutrition_settings(user)
+    d = db.add_direction(user.id, "build muscle while I train", {"protein_g_per_kg": 2.0})
+    assert nutrition_settings(user) == before                          # proposed only: not read
+    db.confirm_direction(d["id"], d["rules"])
+    after = nutrition_settings(user)
+    assert after["protein_g_per_kg"] == 2.0 and after["deficit_kcal"] == before["deficit_kcal"]
+    assert daily_targets(MALE, after)["targets"]["calories"] == daily_targets(MALE, before)["targets"]["calories"]

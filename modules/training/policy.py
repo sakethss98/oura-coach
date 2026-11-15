@@ -6,6 +6,11 @@ facts it needs, and returns the final plan plus a list of overrides. Each overri
 sentence for chat. A plan with several blocks (modules/training/blocks.py) has the type rules
 applied to each block; the day is hard if any block is.
 """
+from functools import lru_cache
+
+import yaml
+
+from core.config import ROOT
 from core.labels import workout_label
 from modules.training.blocks import blocks_of, is_hard, with_blocks
 
@@ -13,7 +18,7 @@ LIGHT_TYPES = {"walk", "mobility", "rest"}
 WEEKEND = {5, 6}            # Saturday, Sunday
 MIN_BLOCK_MINUTES = 10      # a block cut shorter than this by the window is dropped
 # Rules that decide for reasons other than how recovered the body is.
-NON_BODY_RULES = {"checkin", "context_cap", "worked_out", "back_to_back", "weekly_cap", "long_run_weekday",
+NON_BODY_RULES = {"checkin", "context_cap", "limit", "worked_out", "back_to_back", "weekly_cap", "long_run_weekday",
                   "recent_food", "no_time"}
 # Rules that always apply, even when the person chose to skip the others.
 TIME_RULES = {"window", "no_time"}
@@ -49,6 +54,40 @@ def _light_only(block: dict, overrides: list[dict], rule: str, reason: str, plai
     if block["intensity"] > 2:
         _add(overrides, rule, f"{reason}: intensity {block['intensity']} capped at 2.", plain)
         block["intensity"] = 2
+
+
+@lru_cache(maxsize=1)
+def _movements() -> dict:
+    return yaml.safe_load((ROOT / "config" / "movements.yaml").read_text())
+
+
+def movements_of(block: dict, split_day: str | None) -> set[str]:
+    """The movements a planned block uses (config/movements.yaml); strength by its split day."""
+    m = _movements()
+    if block["workout_type"] == "strength":
+        return set(m["strength_split"].get(split_day or "", []))
+    return set(m["workout_types"].get(block["workout_type"], []))
+
+
+def _limits(blocks: list[dict], ctx: dict, overrides: list[dict]) -> None:
+    """Saved limits (an injury): a block using a movement to avoid becomes a walk (or mobility); no effort over
+    the cap."""
+    labels = _movements()["labels"]
+    for lim in ctx.get("limits") or []:
+        avoid = set(lim["avoid"])
+        for b in blocks:
+            hit = movements_of(b, ctx.get("split_day")) & avoid
+            if hit:
+                alt = next(t for t in ("walk", "mobility") if not movements_of({"workout_type": t}, None) & avoid)
+                what = " or ".join(labels.get(x, x) for x in sorted(hit))
+                _add(overrides, "limit", f"Saved limit ({lim['body_area']}): avoid {', '.join(sorted(hit))}: "
+                                         f"{b['workout_type']} changed to {alt}.",
+                     f"Your {lim['body_area']} needs a break from {what}, so a {alt} instead.", changes_type=True)
+                b["workout_type"], b["intensity"] = alt, min(b["intensity"], 2)
+            if lim.get("cap") and b["intensity"] > lim["cap"]:
+                _add(overrides, "limit", f"Saved limit ({lim['body_area']}): intensity {b['intensity']} capped at "
+                                         f"{lim['cap']}.", f"Your {lim['body_area']} needs an easier day, so I kept it light.")
+                b["intensity"] = lim["cap"]
 
 
 def food_cap(recent_food: list[dict], caps: list[dict]) -> tuple[int, dict] | None:
@@ -145,6 +184,8 @@ def _type_rules(blocks: list[dict], ctx: dict, overrides: list[dict]) -> None:
                 _add(overrides, "context_cap", f"{reason}: intensity {b['intensity']} capped at {fact['cap']}.", plain)
                 b["intensity"] = fact["cap"]
 
+    _limits(blocks, ctx, overrides)
+
     if ctx["worked_out_today"]:
         for b in blocks:
             _light_only(b, overrides, "worked_out", f"Already worked out today ({ctx['worked_out_today']})",
@@ -217,6 +258,7 @@ def policy_check(plan: dict, ctx: dict, user_choice: bool = False) -> tuple[dict
       hard_days_prev6 (int: hard days among the 6 days before today), max_hard_days_per_week (int),
       recent_food ([{minutes_ago, calories}]), recent_food_caps (goals.yaml list),
       context_caps ([{text, cap}]: saved facts asking to keep it light today; 3 = light, 2 = very light),
+      limits ([{body_area, avoid, cap}]: saved injuries and limits covering today), split_day (strength's split),
       window (["HH:MM", "HH:MM"] | None: from now until the next event)
     """
     plan, overrides = dict(plan), []

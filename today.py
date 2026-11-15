@@ -15,7 +15,7 @@ from connectors.oura import latest_day, load_fixtures
 from core import db, memory
 from core.config import DAY_END_HOUR, DAY_START_HOUR, TZ
 from core.day import day_bounds, day_of
-from modules.nutrition.targets import daily_targets, recent_food, remaining
+from modules.nutrition.targets import daily_targets, nutrition_settings, recent_food, remaining
 from modules.training import activity
 from modules.training.baseline import compute_baseline, effective_band, food_totals
 
@@ -121,7 +121,7 @@ def day_context(user, day: date, now: datetime, oura: dict, schedule: dict, band
 
     food_today = food_on(user, day)
     totals = {"yesterday": food_totals(food_on(user, day - timedelta(days=1))), "today": food_totals(food_today)}
-    targets = daily_targets(oura["body"], goals["nutrition"])
+    targets = daily_targets(oura["body"], nutrition_settings(user))
 
     return {
         "now": _hm(now),
@@ -144,6 +144,8 @@ def day_context(user, day: date, now: datetime, oura: dict, schedule: dict, band
         "recent_food": recent_food(food_today, now),
         "saved_memory": memory.for_prompt(user, day),
         "context_caps": memory.intensity_caps(user, day),
+        "limits": [{"body_area": x["body_area"], "avoid": x["avoid"], "cap": x["intensity_cap"]}
+                   for x in db.active_limits(user.id, day)],
         "recent_meal_ideas": recent_meal_ideas(user, day),
         "first_plan_today": db.count_planned(user.id, day) == 0,
         "next_split_day": activity.next_split_day(db.done_strength_plans(user.id), goals["strength"]["split"]),

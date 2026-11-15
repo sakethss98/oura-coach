@@ -154,7 +154,7 @@ def score_of_day(user, day: date, now: datetime, health: Health) -> dict:
     night = bundle["today"]
     previous = [datetime.fromisoformat(h["bedtime_start"]) for h in bundle["history"] if h["bedtime_start"]]
     items = today.day_activity(user, day, bundle, goals["activity"])[day.isoformat()]
-    components = [m.score(user, day, now) for m in enabled_modules(user, health=health)]
+    components = [c for c in (m.score(user, day, now) for m in enabled_modules(user, health=health)) if c is not None]
     components += [
         recovery_component(night["time_in_bed_hours"],
                            datetime.fromisoformat(night["bedtime_start"]) if night["bedtime_start"] else None,

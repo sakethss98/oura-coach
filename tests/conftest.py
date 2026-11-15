@@ -301,10 +301,11 @@ def patch_oura(monkeypatch):
             sleep = next(r for r in raw["sleep"]["data"] if r["day"] == day and r["type"] == "long_sleep")
             sleep["bedtime_start"] = f"{day}T{bedtime}:00.000-05:00"
         template = raw["workout"]["data"][0]
-        for n, (activity, start, end) in enumerate(workouts):
+        for n, (activity, start, end, *distance) in enumerate(workouts):      # optional: distance in meters
             raw["workout"]["data"].append({**template, "id": f"test-workout-{n}", "activity": activity, "day": day,
                                            "intensity": "moderate", "start_datetime": f"{day}T{start}:00.000-05:00",
-                                           "end_datetime": f"{day}T{end}:00.000-05:00"})
+                                           "end_datetime": f"{day}T{end}:00.000-05:00",
+                                           **({"distance": distance[0]} if distance else {})})
         return raw
     return apply
 

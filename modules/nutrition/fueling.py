@@ -25,6 +25,8 @@ LONG_RUN_MIN = 60
 SODIUM_MG_PER_MMOL = 23
 RECENT_DAYS = 7
 ASK_WEIGHT = "Tell me your weight and I'll turn these into grams."
+ASK_TIME = ("🏃 Run of {km:g} km · I don't know your usual pace yet (no run with a usable pace in your data). "
+            "Roughly how long will it take you? Then I'll work out what you need.")
 WEIGHT_NOTE = "(using {kg:.0f} kg {source}; tell me if that's off)"
 FROM_WEIGHT = ("day_before_g", "before_g", "max_loss_kg", "caffeine_mg", "recovery_g_per_hour")   # amounts × kg
 MIN_RECENT_DAYS_LOGGED = 2
@@ -55,17 +57,19 @@ def _grams(per_kg: list[float], kg: float | None, step: int = 5) -> list[int] | 
     return [_round(per_kg[0] * kg, step), _round(per_kg[1] * kg, step)] if kg else None
 
 
-def run_minutes(said_minutes: float | None, distance_km: float | None, recent_runs: list[dict]) -> tuple[int, str]:
+def run_minutes(said_minutes: float | None, distance_km: float | None, recent_runs: list[dict],
+                asked_pace: float | None = None) -> tuple[int | None, str]:
     """(minutes, how we know). recent_runs: [{"minutes", "distance_km"}] of the last weeks (Oura + manual).
-    Their words first; a distance at their usual pace; else their longest recent run; else a typical long run."""
+    Their words first; a distance at their usual pace (their runs, else the pace they told us); else their longest
+    recent run; else a typical long run. A distance with no pace known: (None, ...), never a made-up pace."""
     if said_minutes:
         return round(said_minutes), "as you said"
-    pace = easy_pace(recent_runs)
+    pace = easy_pace(recent_runs) or asked_pace
     if distance_km and pace:
         seconds = round(pace * 60)
         return round(distance_km * pace), f"{distance_km:g} km at your usual {seconds // 60}:{seconds % 60:02d} per km"
     if distance_km:
-        return round(distance_km * 7), f"{distance_km:g} km at about 7 min per km; no usable run pace from Oura"
+        return None, f"{distance_km:g} km, but I don't know your usual pace yet"
     if recent_runs:
         return max(r["minutes"] for r in recent_runs), "your longest run in the last 4 weeks; tell me if it's longer"
     return TYPICAL_LONG_RUN_MIN, "a typical long run; tell me if yours is different"

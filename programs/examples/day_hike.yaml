@@ -18,21 +18,21 @@ disciplines:
     measure: elevation_m
     kinds: [hike, walk]
     session_types:
-      hill_walk: {intensity: 2, movements: [downhill]}
-      long_hike: {intensity: 3, long: true, movements: [downhill]}
-      summit: {intensity: 3, event: true, movements: [downhill]}
+      hill_walk: {label: hill walk, plan_as: walk, intensity: 2, movements: [downhill]}
+      long_hike: {label: long hike, plan_as: walk, intensity: 3, long: true, movements: [downhill]}
+      summit: {label: the big hike, intensity: 3, event: true, movements: [downhill]}
   strength:
     measure: min
     kinds: [strength]
     session_types:
-      lower: {intensity: 3, default_min: 35, movements: [deep_knee_bend, spinal_load]}
-      knee_friendly: {intensity: 2, default_min: 30}         # step-ups to a low box, glute bridges, calf raises
+      lower: {label: lower-body strength, plan_as: strength, intensity: 3, default_min: 35, movements: [deep_knee_bend, spinal_load]}
+      knee_friendly: {label: knee-friendly strength, plan_as: strength, intensity: 2, default_min: 30}         # step-ups to a low box, glute bridges, calf raises
     alternatives: {lower: strength.knee_friendly}
   mobility:
     measure: min
     kinds: [mobility, yoga]
     session_types:
-      mobility: {intensity: 1, recovery: true}
+      mobility: {label: mobility, plan_as: mobility, intensity: 1, recovery: true}
 
 shared:
   max_sessions_per_week: 5

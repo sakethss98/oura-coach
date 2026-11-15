@@ -108,3 +108,10 @@ def test_resolve_range_caps_at_90_days_and_refuses_what_it_cant_read():
     assert ((end - start).days + 1, note) == (90, "Only the last 90 days are covered.")
     assert resolve_range(None, "Oct 10", "Oct 1", sunday) is None                                # backwards
     assert resolve_range(None, "someday", None, sunday) is None
+
+
+def test_a_date_with_its_year():
+    today = date(2026, 10, 7)
+    assert resolve_dates("Feb 15 2027", None, today) == (date(2027, 2, 15), date(2027, 2, 15))
+    assert resolve_dates("15 Feb, 2027", None, today) == (date(2027, 2, 15), date(2027, 2, 15))
+    assert resolve_dates("February 15, 2028", None, today)[0] == date(2028, 2, 15)

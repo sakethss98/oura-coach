@@ -385,3 +385,29 @@ def test_the_strictest_fact_wins_and_an_easy_plan_is_untouched():
 def test_a_light_fact_is_not_a_body_reason():
     final, overrides = policy_check(plan("HIIT", 5), ctx(context_caps=[TRAVEL]))
     assert why_sentence(final, overrides, body_ok=True).startswith("Your body could handle more, but you noted")
+
+
+# --- saved limits (an injury): rule `limit`, after context_cap -----------------------------------------------
+
+KNEE = {"body_area": "knee", "avoid": ["running_impact"], "cap": 3}
+
+
+def test_a_run_becomes_a_walk_for_a_knee_that_must_avoid_running_impact():
+    final, overrides = policy_check(plan("easy_run", 3), ctx(limits=[KNEE]))
+    assert final["workout_type"] == "walk" and final["intensity"] <= 2
+    decider = deciding_override(overrides)
+    assert decider["rule"] == "limit" and decider["plain"] == "Your knee needs a break from running impact, so a walk instead."
+
+
+def test_strength_follows_the_split_day_and_the_cap_still_applies():
+    legs = {"body_area": "knee", "avoid": ["deep_knee_bend"], "cap": None}
+    assert policy_check(plan("strength", 3), ctx(limits=[legs], split_day="Legs"))[0]["workout_type"] == "walk"
+    assert policy_check(plan("strength", 3), ctx(limits=[legs], split_day="Push"))[0]["workout_type"] == "strength"
+    shoulder = {"body_area": "shoulder", "avoid": ["overhead"], "cap": 2}
+    final, _ = policy_check(plan("walk", 2), ctx(limits=[shoulder]))
+    assert final["workout_type"] == "walk" and final["intensity"] == 2
+
+
+def test_no_limit_changes_nothing():
+    proposed = plan("easy_run", 3)
+    assert policy_check(proposed, ctx(limits=[{"body_area": "wrist", "avoid": ["grip"], "cap": None}])) == (proposed, [])

@@ -58,6 +58,11 @@ AMOUNT_TOOLS = {"fueling_plan", "save_body_weight"}
 WEIGHT_ANSWER = re.compile(r"^\W*(i'?m|i am|i weigh|about|around|~)?\s*\d{2,3}(\.\d)?\s*(kg|kgs|kilos?|lbs?|pounds)\b",
                            re.I)
 ASKED_WEIGHT = re.compile(r"\byour weight\b", re.I)
+# Their yes to the coach's offer to plan around an injury ("Want me to plan around your knee…?"): save_limit must run,
+# so a yes is never answered with words alone ("I'll swap your runs…" with nothing saved).
+OFFERED_LIMIT = re.compile(r"\b(want me to|should I|shall I|I can)\b[^?]*\bplan around\b", re.I)
+YES = re.compile(r"^\W*(yes|yeah|yep|sure|ok|okay|please|do it|go ahead|sounds good)\b", re.I)
+LIMIT_OWNER = "pain_injury"
 # Categories whose amounts must come from this turn's tool results (a sentence stating another amount is dropped).
 AMOUNTS_FROM_TOOLS = {"fueling_hydration"}
 # A rewrite that talks about rewriting ("Please paste the reply you want rewritten") is not a reply.
@@ -65,6 +70,7 @@ META_REWRITE = re.compile(r"\b(rewrit\w*|paste the|the reply you|underscore\w*)\
 RECENT_FOR_CLASSIFIER = 6    # the classifier sees the last 6 messages (about 3 exchanges) before this one
 # A check-in answer or a yes/no workout question waiting belongs to this category, whatever the classifier says.
 PENDING_OWNER = "training"
+GOAL_OWNER = "goal_program"             # a goal question waiting for their answer: its tools live there
 WEIGHT_OWNER = "fueling_hydration"     # their weight, answering the coach's question: save_body_weight lives there
 log = logging.getLogger(__name__)
 
@@ -162,6 +168,9 @@ def ingest(state: AgentState, config) -> dict:
     db.expire_consults(t.user.id, t.now, timedelta(minutes=CONSULT_TTL_MIN))
     # Days whose cutoff has passed get their final score now, before this message can change them.
     score.finalize_quietly(t.user, t.now, t.use_fixtures)
+    if "goals" in t.user.enabled_modules:      # a goal plan keeps going: missed, moved, held, paused (pure rules)
+        from modules.goals import service
+        service.adjust_quietly(t.user, t.now, t.day, t.use_fixtures)
     pending = db.pending_plan(t.user.id)
     expired = False
     if pending and pending["chat_session_id"] != t.session_id:
@@ -221,12 +230,33 @@ def _waiting_for_training(t) -> list[str]:
     return notes
 
 
+def _waiting_for_goal(t) -> list[str]:
+    """Notes for the classifier: a goal question waiting for their answer."""
+    if "goals" not in t.user.enabled_modules:
+        return []
+    notes = []
+    goal = db.current_goal(t.user.id)
+    if goal and goal["status"] == "setting_up":
+        notes.append("Answers to the coach's goal questions are awaited.")
+    elif goal and goal["status"] == "proposed":
+        notes.append("Their yes or no is awaited to the coach's 'Set it up?' (a goal plan).")
+    elif goal and goal["status"] == "not_feasible":
+        notes.append("A new date or answer for their goal is awaited.")
+    elif goal and goal.get("options_json"):
+        notes.append("A choice is awaited: move the goal date, or keep it and skip the lighter weeks.")
+    direction = db.current_direction(t.user.id)
+    if direction and not direction["confirmed"]:
+        notes.append("A yes or a change is awaited to the proposed direction rules.")
+    return notes
+
+
 def classify(state: AgentState, config) -> dict:
     """Pick this turn's categories. A failure never blocks the message: it goes to "other"."""
     t = turn(config)
     message = _text(state["messages"][-1].content)
     training_notes = _waiting_for_training(t)
-    notes = list(training_notes)
+    goal_notes = _waiting_for_goal(t)
+    notes = list(training_notes) + goal_notes
     previous = chat_sessions.previous_question(t.user, t.session_id, t.now) if t.session_id else None
     if previous:
         notes.append(f"The coach's last message before this conversation: {previous['question']!r}")
@@ -239,6 +269,10 @@ def classify(state: AgentState, config) -> dict:
     categories = route["categories"]
     if categories and training_notes and PENDING_OWNER not in categories and categories != ["off_topic"]:
         categories = categories + [PENDING_OWNER]
+    if categories and goal_notes and GOAL_OWNER not in categories and categories != ["off_topic"]:
+        categories = categories + [GOAL_OWNER]
+    if _accepts_limit_offer(state["messages"]) and LIMIT_OWNER not in categories:
+        categories = [LIMIT_OWNER] + [c for c in categories if c != "off_topic"]     # save_limit lives there
     if _answers_weight_question(state["messages"]) and WEIGHT_OWNER not in categories:
         categories = [WEIGHT_OWNER] + [c for c in categories if c != "off_topic"]   # the weight goes to code's math
     if not categories:
@@ -272,9 +306,18 @@ def _forced_tool(state: AgentState, tools: list) -> str | None:
     this conversation and their message gives one."""
     if _this_turn(state["messages"]):
         return None                                          # only the first call of the turn
-    if _answers_weight_question(state["messages"]) and "save_body_weight" in {tool.name for tool in tools}:
+    names = {tool.name for tool in tools}
+    if _answers_weight_question(state["messages"]) and "save_body_weight" in names:
         return "save_body_weight"
+    if _accepts_limit_offer(state["messages"]) and "save_limit" in names:
+        return "save_limit"
     return None
+
+
+def _accepts_limit_offer(messages: list) -> bool:
+    """Their message says yes to the coach's last message offering to plan around an injury."""
+    last_ai = next((m for m in reversed(messages[:-1]) if isinstance(m, AIMessage) and not m.tool_calls), None)
+    return bool(last_ai and OFFERED_LIMIT.search(_text(last_ai.content)) and YES.match(_text(messages[-1].content)))
 
 
 def _answers_weight_question(messages: list) -> bool:

@@ -257,6 +257,13 @@ def _recent_runs(t) -> list[dict]:
                if w["workout_type"] in RUN_TYPES and w["minutes"]])
 
 
+def _asked_pace(t) -> float | None:
+    """The easy pace they told the goal questions (goal_answers), if any."""
+    goal = db.current_goal(t.user.id)
+    answer = db.goal_answers(goal["id"]).get("easy_pace") if goal else None
+    return answer["value"] if answer else None
+
+
 def _carbs_lately(t) -> dict | None:
     days = [t.day - timedelta(days=i) for i in range(fueling.RECENT_DAYS, 0, -1)]
     entries = {d: db.food_between(t.user.id, *bounds) for d, bounds in bounds_of_days(t.user, days).items()}
@@ -299,7 +306,10 @@ def _fueling(t, state: list, day_text: str | None = None, minutes: int | None = 
         weight_from = None
     if minutes and not _they_said(minutes, state):
         minutes = None                      # a number from an earlier plan, not from them: code finds the length
-    run_min, how = fueling.run_minutes(minutes, distance_km, _recent_runs(t))
+    run_min, how = fueling.run_minutes(minutes, distance_km, _recent_runs(t), _asked_pace(t))
+    if run_min is None:                     # a distance and no pace known: ask how long, never guess a pace
+        return (as_json({"sent_as_is": True, "minutes": None, "pace_known": False}),
+                {"verbatim": fueling.ASK_TIME.format(km=distance_km)})
     result = fueling.plan(run_min, how, weight, parts, run_day, t.day, _carbs_lately(t), race,
                           ask_weight=weight is None and db.ask_once(t.user.id, "body_weight"), distance_km=distance_km,
                           weight_from=weight_from)

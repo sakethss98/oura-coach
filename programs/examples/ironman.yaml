@@ -16,31 +16,31 @@ disciplines:
     measure: min
     kinds: [swim]
     session_types:
-      easy: {intensity: 2, movements: [swimming_shoulder]}
-      long: {intensity: 3, long: true, movements: [swimming_shoulder]}
+      easy: {label: easy swim, intensity: 2, movements: [swimming_shoulder]}
+      long: {label: long swim, intensity: 3, long: true, movements: [swimming_shoulder]}
   bike:
     measure: min
     kinds: [cycle]
     session_types:
-      easy: {intensity: 2}
-      long: {intensity: 4, hard: true, long: true}
+      easy: {label: easy ride, intensity: 2}
+      long: {label: long ride, intensity: 4, hard: true, long: true}
   run:
     measure: km
     kinds: [run]
     session_types:
-      easy: {intensity: 3, pace: easy, movements: [running_impact]}
-      long: {intensity: 4, hard: true, long: true, pace: easy, movements: [running_impact]}
+      easy: {label: easy run, plan_as: easy_run, intensity: 3, pace: easy, movements: [running_impact]}
+      long: {label: long run, plan_as: long_run, intensity: 4, hard: true, long: true, pace: easy, movements: [running_impact]}
     alternatives: {easy: bike.easy}
   race:
     measure: min
     kinds: [other]
     session_types:
-      ironman: {intensity: 5, hard: true, event: true, movements: [swimming_shoulder, running_impact]}
+      ironman: {label: the race, intensity: 5, hard: true, event: true, movements: [swimming_shoulder, running_impact]}
   strength:
     measure: min
     kinds: [strength]
     session_types:
-      general: {intensity: 2, default_min: 30, movements: [spinal_load]}
+      general: {label: strength, plan_as: strength, intensity: 2, default_min: 30, movements: [spinal_load]}
 
 shared:
   max_sessions_per_week: 6

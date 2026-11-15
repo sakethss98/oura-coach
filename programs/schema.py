@@ -23,6 +23,8 @@ MI_TO_KM = 1.609344
 
 
 class SessionType(BaseModel):
+    label: str                    # what the person reads ("easy run", "upper-body strength")
+    plan_as: str | None = None    # the workout type a day's plan uses for it (modules/training), None = not planned
     intensity: int = Field(ge=1, le=5)
     hard: bool = False            # counts toward the week's hard sessions
     long: bool = False            # the week's long session: the anchor, and the long-session growth check

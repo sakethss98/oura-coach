@@ -178,7 +178,7 @@ def test_fresh_database_needs_no_backup_and_seeds_user_1(at_path):
     db.init_db()
     assert backups(at_path) == []
     row = db.get_user_row(1)
-    assert row["timezone"] == "America/Chicago" and json.loads(row["enabled_modules"]) == ["training", "nutrition"]
+    assert row["timezone"] == "America/Chicago" and json.loads(row["enabled_modules"]) == ["training", "nutrition", "goals"]
     assert row["score_cutoff"] == "21:00" and row["session_gap_min"] == 15
     assert [m["text"] for m in db.list_memory(1)] == ["Vegetarian, eats eggs", "Prefers Indian food"]
 
@@ -224,3 +224,31 @@ def test_an_active_note_missing_from_memory_stops_the_drop(m32_db):
     with pytest.raises(RuntimeError, match="not in memory"):
         db.init_db()
     assert "context_notes" in tables(m32_db) and "intensity_cap" not in columns(m32_db, "memory")  # rolled back
+
+
+# --- Part D -> Part E: the goal tables, and the goals module for user 1 ------------------------------------
+
+GOAL_TABLES = ("goals", "goal_answers", "program_days", "program_adjustments", "limits", "direction_goals",
+               "direction_rules")
+
+
+@pytest.fixture
+def part_d_db(at_path):
+    """A database from before Part E: no goal tables, user 1 with training + nutrition."""
+    db.init_db()
+    with sqlite3.connect(at_path) as conn:
+        for table in GOAL_TABLES:
+            conn.execute(f"DROP TABLE {table}")
+        conn.execute("UPDATE user_settings SET enabled_modules = '[\"training\", \"nutrition\"]' WHERE user_id = 1")
+    return at_path
+
+
+def test_a_part_d_database_is_backed_up_then_gets_the_goal_tables_and_module(part_d_db):
+    db.init_db()
+    [backup] = backups(part_d_db)
+    assert "goals" not in tables(backup) and set(GOAL_TABLES) <= tables(part_d_db)
+    assert json.loads(db.get_user_row(1)["enabled_modules"]) == ["training", "nutrition", "goals"]
+    with sqlite3.connect(part_d_db) as conn:          # they turn it off later: it stays off
+        conn.execute("UPDATE user_settings SET enabled_modules = '[\"training\"]' WHERE user_id = 1")
+    db.init_db()
+    assert len(backups(part_d_db)) == 1 and json.loads(db.get_user_row(1)["enabled_modules"]) == ["training"]

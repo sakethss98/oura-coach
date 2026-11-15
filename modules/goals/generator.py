@@ -130,7 +130,29 @@ def _drop_to_days(t: Template, week: _Week, max_days: int) -> list[str]:
     return dropped
 
 
-def _apply_limits(t: Template, profile: Profile, week: _Week) -> list[str]:
+def _cap_days(t: Template, week: _Week, discipline: str, most: int) -> list[str]:
+    """At most `most` days a week with this discipline (a direction rule): the drop order first, then the shortest;
+    never the long session or the event."""
+    def days_with():
+        return [d for d in week.window() if any(x["discipline"] == discipline for x in week.days.get(d, []))]
+    dropped = []
+    order = [n for n in t.shared.drop_order if _ref(n)[0] == discipline]
+    while len(days_with()) > most:
+        candidates = [(d, x) for d in days_with() for x in week.days[d] if x["discipline"] == discipline
+                      and not (t.session_type(discipline, x["type"]).long or t.session_type(discipline, x["type"]).event)]
+        if not candidates:
+            break
+        ranked = sorted(candidates, key=lambda c: (next((i for i, n in enumerate(order) if _matches(c[1], n)),
+                                                         len(order)), c[1]["amount"] or 0))
+        day, x = ranked[0]
+        week.days[day] = [y for y in week.days[day] if y is not x]      # a lift after it stays, on its own
+        dropped.append(f"week {week.n} {day:%a %b %-d}: {discipline}.{x['type']} (at most {most} {discipline} days)")
+    return dropped
+
+
+def apply_limits(t: Template, profile: Profile, week) -> list[str]:
+    """Sessions a limit rules out become their alternative, else they go; no effort over the cap. `week.days` =
+    {date: [session]} (changed in place); returns the changes in words."""
     changes = []
     for day, sessions in week.days.items():
         active = [lim for lim in profile.limits if lim.active(day)]
@@ -181,16 +203,18 @@ def _fit_time(t: Template, profile: Profile, week: _Week) -> list[str]:
 
 
 def generate(t: Template, variant: str, profile: Profile, start: date, event: date | None = None,
-             entry_week: int = 1, extra_weeks: int = 0, strength_per_week: dict[str, int] | None = None) -> dict:
+             entry_week: int = 1, extra_weeks: int = 0, strength_per_week: dict[str, int] | None = None,
+             skip_weeks: tuple[int, ...] = (), max_days: dict[str, int] | None = None) -> dict:
     """{"days": [{"date", "week" (the plan's week), "tweek" (the template's week), "phase", "anchor", "sessions"}],
     "changes": [what code changed and why],
     "errors": validate_plan's (non-empty = don't write it)}."""
     require_approved(t)
     template_weeks = t.variants[variant].weeks
-    weeks = [template_weeks[entry_week - 1]] * extra_weeks + template_weeks[entry_week - 1:]
-    tweeks = [entry_week] * extra_weeks + list(range(entry_week, len(template_weeks) + 1))
+    tweeks = [entry_week] * extra_weeks + [n for n in range(entry_week, len(template_weeks) + 1) if n not in skip_weeks]
+    weeks = [template_weeks[n - 1] for n in tweeks]
     rules = t.rules(variant)
     days_of = anchors(start, event, profile.anchor_weekday, len(weeks))
+    discipline_days = max_days
     max_days = min(profile.days_per_week, t.shared.max_sessions_per_week)
     per_phase = {**t.shared.strength_per_week, **(strength_per_week or {})}
     built, changes = [], []
@@ -200,8 +224,10 @@ def generate(t: Template, variant: str, profile: Profile, start: date, event: da
             week.days.setdefault(anchor + timedelta(days=s.at), []).append(
                 _session(t, s.discipline, s.type, s.amount, s.minutes))
         changes += _drop_to_days(t, week, max_days)
+        for discipline, most in (discipline_days or {}).items():
+            changes += _cap_days(t, week, discipline, most)
         changes += _place_strength(t, week, per_phase.get(w.phase, 0), max_days)
-        changes += _apply_limits(t, profile, week)
+        changes += apply_limits(t, profile, week)
         changes += _fit_time(t, profile, week)
         built.append(week)
     days = []

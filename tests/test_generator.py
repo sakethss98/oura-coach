@@ -143,3 +143,16 @@ def test_rest_before_the_long_run_is_a_novice_rule_intermediate_keeps_higdons_sa
     assert all(s == [] for s in day_before_long(novice))
     saturdays = day_before_long(inter)
     assert sum(1 for s in saturdays if s and s[0]["type"] in ("pace", "easy")) >= 8      # Higdon's Saturday runs
+
+
+def test_at_most_n_run_days_a_week_drops_the_lightest_runs_first():
+    t = library.load("half_marathon")
+    p = profile()
+    a = assess(t, "novice", p.history, START, RACE, p.anchor_weekday)
+    result = generate(t, "novice", p, START, RACE, a["entry_week"], a["extra_weeks"], max_days={"run": 3})
+    assert result["errors"] == []
+    for n in {d["week"] for d in result["days"]}:
+        run_days = [d for d in result["days"] if d["week"] == n and any(x["discipline"] == "run" for x in d["sessions"])]
+        assert len(run_days) <= 3
+    assert len(sessions(result, "run.long")) == len(NOVICE_LONG_MI) + 1          # never the long run
+    assert any("run.short (at most 3 run days)" in c for c in result["changes"])

@@ -70,7 +70,11 @@ def _resolve_day(text: str, today: date, on_or_after: date) -> date | None:
     except ValueError:
         pass
 
-    words = text.split()
+    words = text.replace(",", " ").split()
+    year = None
+    if len(words) == 3 and re.fullmatch(r"20\d\d", words[2]):                # "May 3 2027", "3 May, 2027"
+        year, words = int(words[2]), words[:2]
+        text = " ".join(words)
     if len(words) == 2 and words[0] == "next" and words[1] in WEEKDAYS:
         return _resolve_day(words[1], today, on_or_after) + timedelta(days=7)
     if text in WEEKDAYS:
@@ -87,9 +91,11 @@ def _resolve_day(text: str, today: date, on_or_after: date) -> date | None:
         return None
     try:
         day_num = int(str(day_num).rstrip("stndrh"))
-        resolved = date(today.year, month, day_num)
+        resolved = date(year or today.year, month, day_num)
     except ValueError:
         return None
+    if year:
+        return resolved
     if resolved < today:                                              # already passed: next year
         resolved = resolved.replace(year=today.year + 1)
     return resolved

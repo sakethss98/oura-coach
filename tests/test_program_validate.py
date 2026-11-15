@@ -17,10 +17,10 @@ def tiny(weeks: list[list[dict]], **changes) -> Template:
     data = {
         "name": "tiny", "title": "Tiny", "source": "drafted", "status": "approved",
         "disciplines": {"run": {"measure": "km", "kinds": ["run"], "session_types": {
-            "easy": {"intensity": 3, "pace": "easy", "movements": ["running_impact"]},
-            "hard": {"intensity": 5, "hard": True, "pace": "easy", "movements": ["running_impact"]},
-            "long": {"intensity": 4, "hard": True, "long": True, "pace": "easy", "movements": ["running_impact"]},
-            "race": {"intensity": 5, "hard": True, "event": True, "pace": "easy"}}}},
+            "easy": {"label": "easy run", "intensity": 3, "pace": "easy", "movements": ["running_impact"]},
+            "hard": {"label": "hard run", "intensity": 5, "hard": True, "pace": "easy", "movements": ["running_impact"]},
+            "long": {"label": "long run", "intensity": 4, "hard": True, "long": True, "pace": "easy", "movements": ["running_impact"]},
+            "race": {"label": "the race", "intensity": 5, "hard": True, "event": True, "pace": "easy"}}}},
         "shared": {"max_sessions_per_week": 6, "max_hard_per_week": 2},
         "variants": {"only": {"source": "test", "weeks": [
             {"phase": "build", "sessions": [{"discipline": "run", **s} for s in w]} for w in weeks]}},

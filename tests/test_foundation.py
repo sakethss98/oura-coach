@@ -141,15 +141,16 @@ def test_bundle_includes_manual_workouts(user):
 # --- registry and users -------------------------------------------------------------
 
 def test_registry_loads_only_enabled_modules(user):
-    assert [m.name for m in enabled_modules(user)] == ["training", "nutrition"]
+    assert [m.name for m in enabled_modules(user)] == ["training", "nutrition", "goals"]
     only_food = users.User(**{**user.__dict__, "enabled_modules": ("nutrition",)})
     assert [m.name for m in enabled_modules(only_food)] == ["nutrition"]
 
 
 def test_module_contexts_are_short_plain_summaries(user):
-    training, nutrition = enabled_modules(user)
+    training, nutrition, goals = enabled_modules(user)
     assert training.context(user, date(2026, 10, 7)) == "No workout planned today."
     assert nutrition.context(user, date(2026, 10, 7)) == "No food logged today."
+    assert goals.context(user, date(2026, 10, 7)) == "No goal plan set up."
 
 
 def test_telegram_chat_maps_to_its_user(user):

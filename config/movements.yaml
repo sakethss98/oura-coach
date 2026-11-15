@@ -11,3 +11,28 @@ movements:
   grip: hard gripping or hanging (pull-ups, heavy rows, farmer's carries)
   rotation: loaded twisting (throws, swings, rotational core work)
   swimming_shoulder: repeated overhead arm strokes (freestyle, butterfly)
+
+# How each movement reads in a sentence ("Saved: no running impact for your knee").
+labels:
+  running_impact: running impact
+  jumping: jumping
+  deep_knee_bend: deep knee bends
+  downhill: steep downhills
+  overhead: overhead work
+  spinal_load: heavy loads on the spine
+  grip: hard gripping
+  rotation: loaded twisting
+  swimming_shoulder: overhead swim strokes
+
+# The day's plan types (modules/training/schemas.py) -> the movements they use, for policy rule `limit`.
+# Strength depends on the split day.
+workout_types:
+  easy_run: [running_impact]
+  long_run: [running_impact]
+  HIIT: [jumping, running_impact]
+  walk: []
+  mobility: []
+strength_split:
+  Push: [overhead]
+  Pull: [grip]
+  Legs: [deep_knee_bend, spinal_load]

@@ -74,17 +74,27 @@ def _label(day: int, dated: bool) -> str:
 
 # --- the checks both share --------------------------------------------------------------------------------
 
+def one_session(t: Template, discipline: str) -> float:
+    """The smallest session of a discipline in the template (its default length for added sessions): below this
+    much in a week, a discipline is new to them and its first week has nothing to compare with."""
+    amounts = [x.amount for v in t.variants.values() for w in v.weeks for x in w.sessions
+               if x.discipline == discipline and x.amount]
+    amounts += [st.default_min for st in t.disciplines[discipline].session_types.values() if st.default_min]
+    return min(amounts, default=0)
+
+
 def _growth(t: Template, weeks: list[dict], history: dict, where: str) -> list[str]:
     s = safety()
     errors = []
     for discipline in t.disciplines:
+        smallest = one_session(t, discipline)
         loads = list(history.get(discipline, {}).get("weekly", [])) + [_load(t, _all(w), discipline) for w in weeks]
         offset = len(loads) - len(weeks)
         for i, w in enumerate(weeks):
             before = loads[max(0, offset + i - s["growth_lookback_weeks"]):offset + i]
             base = max(before, default=0)
             load = loads[offset + i]
-            if base > 0 and load > base * (1 + s["weekly_growth_max"]) + EPS:
+            if base > 0 and base >= smallest - EPS and load > base * (1 + s["weekly_growth_max"]) + EPS:
                 errors.append(f"{where} week {w['n']}: {discipline} load {load:.1f} {_unit(t, discipline)} is "
                               f"{(load / base - 1) * 100:.0f}% over the highest of the 3 weeks before "
                               f"({base:.1f}); the limit is {s['weekly_growth_max'] * 100:.0f}%")

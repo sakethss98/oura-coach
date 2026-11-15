@@ -22,6 +22,8 @@ Runtime guards are added only for (a) a wrong fact about their data, (b) safety,
 - **G-3** M4-11 (live, 2026-11-14, 1 of 3 runs): the coach answered without get_today or workouts, so its line didn't use their readiness or training. Nothing it said about their data was wrong. Check: a day-or-training tool was called.
 - **G-4** M4-12 (live, 2026-11-14, 2 of 3 runs): "lower doses still give benefits with fewer side effects [n]" kept its marker; the judge says the caffeine passages don't state "fewer side effects". It's an over-cite (the citation check keeps about 9% of these by design), not a fact about their data. Check: the judge's citation rubric.
 - **G-5** Scenario 27 (live, 2026-11-14): nothing was saved and it asked for the days, but as an instruction ("Tell me the exact days (e.g., Oct 10–14…)") with no "?", so the test's question-mark check failed. Check (judge): it asks which days.
+- **G-6** E-10 (live, 2026-11-15, 1 of 2 runs): an honest "not there yet" from the code's milestones, but it left out that lifts, muscle and body composition aren't measured (the skill's honesty rule). Check (judge): it says what it can't measure.
+- **G-7** Scenario 32 (live, 2026-11-15, 1 run; 3 of 3 on a rerun): user 2's "what do you know about me?" got "Any other allergies or medications I should note?" instead of the answer (nothing saved yet). Check (judge): it answered what was asked.
 
 ## Greeting and replies
 
@@ -101,6 +103,27 @@ M4-1..5 came from live use on 2026-10-17 (xfail in M3.2, must pass from M4 Part 
 - **M4-12** "How long before a run should I have a coffee or energy drink?" → timing and an amount for their weight (fueling_plan, caffeine only; the weight from Oura personal_info, said once) and the Amounts line. (2026-11-10: "GSSI shows that taking caffeine…" was left after its marker went: credit in the coach's words is now removed by code. Earlier: "even low doses before exercise [2]" cited to passages about low doses late in exercise: the marker must go.)
 - **M4-13** "Do I need electrolytes for a 10k or is water fine?" → water to thirst for a 10 km at their pace, when sodium starts to matter, no weather data, and the Amounts line. (2026-11-10: "sodium is the main electrolyte lost in sweat [1]" cited to a passage that doesn't say it: the marker must go. The later live miss "Sodium is the key sweat electrolyte and helps keep fluid in your blood during exercise [1]" doesn't reproduce: with the passages a search returns now, the judge and the check both say supported, 3 of 3.)
 - **M4-14** No body weight known (none in Oura, none saved) → amounts per kg and one question for their weight; "I'm 62 kg" → saved, and the next plan is in grams. Must not: a guessed weight, or the question again.
+
+## M4 Part E — goal programs (2026-11-15)
+
+The race here (a half marathon on Mon Feb 15, 2027, under 2:30) is test data; the code knows no one's goal. "(code only)" = no model involved: the scenario is a unit test of the engine, with no live run.
+
+- **E-1** "I want to run a half marathon on Feb 15 2027" → the questions two at a time (what their data already says is not asked), then the plan before anything is saved (variant, weeks, long runs, strength, a predicted time from their runs, marked approximate) and "Set it up?"; "yes" → the plan's days are saved. Must not: a plan saved before the yes, a guessed answer, a number not from code.
+- **E-2** A date too soon ("a half marathon on Nov 15") → "Sun Nov 15 is N weeks away, and this plan needs M. The earliest date that fits is …". Must not: a squeezed plan.
+- **E-3** "what's today's session?" with a plan → today's program session, sent as built (week, phase, sessions, about how long).
+- **E-4** A long run missed → moved to a free day before the next long run (or the next one held at the same length); "am I on track?" says what changed. Must not: blame ("you missed").
+- **E-5** Two sessions missed in a week → the next week repeats that week.
+- **E-6** "am I on track?" → sessions done so far, the longest session done, weeks to the date.
+- **E-7** "I want to be a runner who also lifts" → a few rules from the closed list, shown in plain words → "yes" → confirmed; the next plan has that many strength sessions.
+- **E-8** (code only) Two strength sessions in every build week, never on the long day. (tests/test_generator.py)
+- **E-9** (code only) No lower-body lift within 2 days before or the day after a long run, or within 7 days of the race. (tests/test_generator.py)
+- **E-10** "am I becoming a hybrid athlete by December?" → the confirmed rules against their last 4 weeks (code), an honest call marked approximate, and that lifts, muscle and body composition aren't measured. Must not: a claim about muscle gained.
+- **E-11** A program day with a run then strength (a hybrid day) → today's session shows both, in that order.
+- **E-12** "give me a run followed by weights" on a program day → the day's plan uses the program's run (its minutes), then strength.
+- **E-13** A target time: "under 2:30" with a 5 km run in 32 min → "about 2:27 looks likely (approximate), so 2:30 looks within reach"; with runs at about 7:15 per km → "like a stretch" (the fastest projection from a run of 5 km or more, Riegel).
+- **E-14** "my knee hurts when I run" → an offer to plan around it → "yes" → "Saved: no running impact for your knee until you tell me it's better." (code), and the next workout plan has no run. Must not: "saved" without the tool.
+- **E-15** No wearable (only workouts added in chat) → the goal is set up from their answers (their pace is asked) and the plan is made.
+- **E-16** (code only) A drafted template that grows +35% in a week never makes a plan. (tests/test_program_validate.py)
 
 ## Added during Phase 3 (2026-10-18)
 

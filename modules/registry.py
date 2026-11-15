@@ -5,6 +5,7 @@ from importlib import import_module
 AVAILABLE = {
     "training": "modules.training.module:TrainingModule",
     "nutrition": "modules.nutrition.module:NutritionModule",
+    "goals": "modules.goals.module:GoalsModule",
 }
 
 

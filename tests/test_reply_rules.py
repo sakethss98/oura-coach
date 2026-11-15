@@ -60,11 +60,25 @@ def test_enforce_drops_an_offer_and_keeps_the_answer():
     assert enforce("About 200 mg of caffeine. Want me to look it up?", set()) == "About 200 mg of caffeine."
 
 
-def test_guilt_words_are_rewritten():
-    for text in ("Not a smart way to make up one missed session.", "You failed to log dinner.",
-                 "You should have slept more.", "You're behind on protein."):
-        assert any("guilt" in v for v in violations(text, set())), text
-    assert violations("Rough night, that happens. An easy run today?", set()) == []
+def test_blame_aimed_at_them_is_rewritten_but_missed_sessions_and_numbers_are_fine():
+    for text in ("You missed your run again.", "You failed to log dinner.", "You should have slept more.",
+                 "You're behind on protein.", "Honestly, you've been slacking.", "Don't be lazy about stretching."):
+        assert any("blame" in v for v in violations(text, set())), text
+    for text in ("Rough night, that happens. An easy run today?", "Moved the long run you missed to Saturday.",
+                 "Not a smart way to make up one missed session.", "That's 2 km behind last week's long run."):
+        assert violations(text, set()) == [], text
+
+
+def test_a_limit_claimed_without_the_tool_is_a_false_claim():
+    saved = "Saved: no running impact for your knee until you tell me it's better."
+    assert any("claims" in v for v in violations(saved, set()))
+    assert any("claims" in v for v in violations("I've saved that for your knee.", set()))
+    assert any("claims" in v for v in violations("I'll plan around your knee from now on.", set()))
+    assert any("claims" in v for v in violations("I'll swap runs for low-impact cardio until it's better.", set()))
+    assert violations("I've saved that for your knee.", {"save_limit"}) == []
+    assert any("claims" in v for v in violations("Saved your half on Feb 15, about 19 weeks away.", set()))
+    assert any("claims" in v for v in violations("Nice—saved: 5 days a week.", set()))
+    assert not violations("Nice—saved: 5 days a week.", {"answer_goal"})
 
 
 def test_enforce_keeps_whole_sentences_and_a_short_closing_question():

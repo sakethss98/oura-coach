@@ -73,6 +73,9 @@
 {"text": "How did I sleep this week?", "categories": ["trends_patterns", "recovery_sleep"], "source": "scenario"}
 {"text": "Going for a 2-hour run after 5 hours of sleep", "categories": ["training", "recovery_sleep"], "source": "scenario"}
 {"text": "I'll do HIIT twice today to make up for yesterday", "categories": ["training"], "source": "scenario"}
+{"text": "yes", "categories": ["goal_program"], "notes": ["Their yes or no is awaited to the coach's 'Set it up?' (a goal plan)."], "context": "'Set it up?'", "source": "scenario"}
+{"text": "yes", "categories": ["goal_program"], "notes": ["A yes or a change is awaited to the proposed direction rules."], "context": "proposed direction rules", "source": "scenario"}
+{"text": "yes", "categories": ["pain_injury"], "prior_turns": [["them", "my knee hurts when I run"], ["coach", "Sorry about the knee. Want me to plan around your knee, with no running impact, until it's better?"]], "context": "Want me to plan around your knee", "source": "scenario"}
 {"text": "yes", "categories": ["training"], "source": "scenario", "notes": ["A yes/no answer is awaited to the coach's question: \"I'd suggest a 30-min walk instead. Still want HIIT?\""], "context": "A yes/no answer is awaited"}
 {"text": "yes", "categories": ["training"], "source": "scenario", "notes": ["A yes/no workout question from earlier today expired unanswered."], "context": "expired unanswered", "held_out": true}
 {"text": "yes", "categories": ["logging"], "source": "scenario", "prior_turns": [["them", "I did 49 min HIIT at 10:37"], ["coach", "Oura doesn't have it. Oura only shares workouts the ring recorded (Apple Watch sessions don't come through). Want me to add 49 min of HIIT at 10:37am?"]], "context": "Oura only shares workouts the ring recorded"}
@@ -91,3 +94,18 @@
 {"text": "what's my plan today?", "categories": ["training"], "source": "scenario"}
 {"text": "had a banana", "categories": ["logging"], "source": "scenario"}
 {"text": "actually it was 2 bananas", "categories": ["logging"], "source": "scenario"}
+{"text": "I want to run a half marathon on Feb 15 2027", "categories": ["goal_program"], "source": "scenario"}
+{"text": "5 days, up to 90 minutes", "categories": ["goal_program"], "notes": ["Answers to the coach's goal questions are awaited."], "context": "Answers to the coach's goal questions are awaited.", "source": "scenario"}
+{"text": "150 minutes on Sundays, no injuries", "categories": ["goal_program"], "notes": ["Answers to the coach's goal questions are awaited."], "context": "Answers to the coach's goal questions are awaited.", "source": "scenario"}
+{"text": "a gym, and under 2:30", "categories": ["goal_program"], "notes": ["Answers to the coach's goal questions are awaited."], "context": "Answers to the coach's goal questions are awaited.", "source": "scenario"}
+{"text": "no target time", "categories": ["goal_program"], "notes": ["Answers to the coach's goal questions are awaited."], "context": "Answers to the coach's goal questions are awaited.", "source": "scenario"}
+{"text": "5 days, 90 min, 150 on Sundays, no injuries, a gym, under 2:30", "categories": ["goal_program"], "notes": ["Answers to the coach's goal questions are awaited."], "context": "Answers to the coach's goal questions are awaited.", "source": "scenario"}
+{"text": "I want to run a half marathon on Nov 15", "categories": ["goal_program"], "source": "scenario"}
+{"text": "5 days, 90 min, 150 on Sundays, no injuries, a gym, no target", "categories": ["goal_program"], "notes": ["Answers to the coach's goal questions are awaited."], "context": "Answers to the coach's goal questions are awaited.", "source": "scenario"}
+{"text": "5 days, 90 min, 150 on Sundays, some running, no injuries, no gear, no target, 6:45 a km", "categories": ["goal_program"], "notes": ["Answers to the coach's goal questions are awaited."], "context": "Answers to the coach's goal questions are awaited.", "source": "scenario"}
+{"text": "what's today's session?", "categories": ["goal_program"], "source": "scenario"}
+{"text": "am I on track?", "categories": ["goal_program"], "source": "scenario"}
+{"text": "I want to be a runner who also lifts", "categories": ["goal_program"], "source": "scenario"}
+{"text": "am I becoming a hybrid athlete by December?", "categories": ["goal_program"], "source": "scenario"}
+{"text": "give me a run followed by weights", "categories": ["training"], "source": "scenario"}
+{"text": "my knee hurts when I run", "categories": ["pain_injury"], "source": "scenario"}

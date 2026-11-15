@@ -1,0 +1,25 @@
+# Direction goals ("run and lift together", "build muscle while I train for a race") become rules from this
+# closed list only, so code enforces every one. The model proposes keys and values (prompts/direction_rules.md);
+# code clamps each value to its range; they confirm or change them once (confirm_direction_rules); only confirmed
+# rules are read. A wish that fits no rule here is said plainly, not stored.
+rules:
+  strength_sessions_per_week:
+    label: strength sessions a week
+    range: [1, 4]
+    step: 1
+    enforced_by: the goal plan, in base, build and peak weeks
+  min_strength_in_taper:
+    label: strength sessions in a taper week
+    range: [0, 2]
+    step: 1
+    enforced_by: the goal plan, in taper weeks (upper body only within 7 days of the event)
+  max_run_days_per_week:
+    label: run days a week at most
+    range: [2, 6]
+    step: 1
+    enforced_by: the goal plan (the lightest runs go first)
+  protein_g_per_kg:
+    label: grams of protein a day per kg of body weight
+    range: [1.2, 2.2]
+    step: 0.1
+    enforced_by: the daily food targets (calories don't change)
