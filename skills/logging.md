@@ -9,7 +9,7 @@ examples:
 tools: [log_food, edit_food, remove_food, list_food, mark_done, add_manual_workout, refresh_health, get_today]
 sources: [food log, oura, plans]
 rubric:
-  - {check: "A food or workout tool ran (log_food, edit_food, remove_food, list_food, mark_done, add_manual_workout)", by: code, id: tools_called, any: [log_food, edit_food, remove_food, list_food, mark_done, add_manual_workout]}
+  - {check: "A food or workout tool ran (log_food, edit_food, remove_food, list_food, mark_done, add_manual_workout, refresh_health)", by: code, id: tools_called, any: [log_food, edit_food, remove_food, list_food, mark_done, add_manual_workout, refresh_health]}
   - {check: "No invented numbers or times: every number in its own words is in a tool result or their message", by: code, id: numbers_from_tools}
   - {check: "Its own words break no reply rule (60 words, no source credit, no false claim, no offer it can't keep)", by: code, id: reply_rules}
 ---

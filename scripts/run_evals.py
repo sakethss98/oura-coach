@@ -15,6 +15,7 @@ Usage:
   python scripts/run_evals.py --estimate data/evals/<pilot>   # what a full run would cost, from a pilot
   python scripts/run_evals.py --only G-2/G-4 --trials 10      # one case or category, many times
   python scripts/run_evals.py --effort agent=low --effort classifier=low ...   # G3b: reasoning effort per job
+  python scripts/run_evals.py --compare data/evals/<run A> data/evals/<run B>   # side by side on shared cases
 """
 import argparse
 import json
@@ -154,6 +155,24 @@ def report(results: list[dict], trials: int, title: str, effort: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def compare(dirs: list[Path]) -> str:
+    """Two or more runs side by side, over the cases every run has (G3b: one setting against another)."""
+    runs = {d.name: [json.loads(line) for line in (d / "results.jsonl").read_text().splitlines()] for d in dirs}
+    shared = set.intersection(*({r["id"] for r in rs} for rs in runs.values()))
+    head = ["run", "efforts", "trials", "checks", "trials passed", "latency s", "agent s", "tokens out", "cost $"]
+    lines = [f"Over {len(shared)} shared cases.", "", "| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
+    for name, rs in runs.items():
+        rs = [r for r in rs if r["id"] in shared]
+        checks = [g for r in rs for g in r["checks"] if g["answer"] != "n/a"]
+        efforts = ", ".join(f"{k}={v}" for k, v in rs[0].get("params", {}).items())
+        agent = sum(r["coach"].get("seconds_by_job", {}).get("agent", 0) for r in rs) / len(rs)
+        lines.append(f"| {name} | {efforts} | {len(rs)} | {_rate(sum(g['answer'] == 'yes' for g in checks), len(checks))} "
+                     f"| {_rate(sum(r['passed'] for r in rs), len(rs))} | {sum(r['latency_s'] for r in rs) / len(rs):.1f} "
+                     f"| {agent:.1f} | {sum(r['coach']['output_tokens'] for r in rs) / len(rs):.0f} "
+                     f"| {sum(r['coach']['cost'] for r in rs):.3f} |")
+    return "\n".join(lines) + "\n"
+
+
 def estimate(pilot_dir: Path, trials: int, workers: int) -> str:
     """A full run's cost and time, from a pilot: the average per trial in each category × the full set."""
     pilot = [json.loads(line) for line in (pilot_dir / "results.jsonl").read_text().splitlines()]
@@ -184,9 +203,13 @@ def main() -> None:
     p.add_argument("--estimate", type=Path, help="a pilot's data/evals/<run> folder: print a full run's cost")
     p.add_argument("--tag", help="the run's name (default: date-time)")
     p.add_argument("--regrade", type=Path, help="grade a run's saved replies again by today's rubrics")
+    p.add_argument("--compare", type=Path, nargs="+", help="data/evals/<run> folders: side by side on shared cases")
     args = p.parse_args()
     if args.estimate:
         print(estimate(args.estimate, args.trials, args.workers))
+        return
+    if args.compare:
+        print(compare(args.compare))
         return
     effort = dict(e.split("=", 1) for e in args.effort)
     cases = load_cases(args.only, args.per_category)

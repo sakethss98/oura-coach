@@ -59,3 +59,17 @@ A check changes only when it contradicts the designed behavior, never to raise t
 **source_lines**
 - What changed: it now accepts "Source: GSSI – …", the unnumbered line citations.finish writes for a single source with no Amounts line.
 - Why: before the fix, every correct single-source reply would have failed.
+
+## 2026-11-15: after the first full run (228 replies)
+
+The published table (docs/evals/2026-11-15.md) was graded with the checks as they were before these changes.
+
+**training**
+- Before: "A workout it gives with minutes came from a plan tool, not the model's own words" (code, `plan_by_code`)
+- After: "If they ask for a workout to do now, it asks the check-in question or sends a plan from a tool, rather than writing the workout itself (a suggestion while pushing back on their idea is fine)" (judge)
+- Why: it applied 8 times and failed all 8, every one a designed reply. When they propose something that works against them, the coach offers one better option or two (scenarios M4-8..10), and general advice may name a duration. Code can't tell a pushback option from a plan written in place of the check-in; the check's intent (a workout request goes through the check-in or a plan tool) is kept.
+
+**logging**
+- Before: "A food or workout tool ran (log_food, edit_food, remove_food, list_food, mark_done, add_manual_workout)"
+- After: the same list, plus refresh_health
+- Why: asking whether a workout was recorded, or asking to pull it from the ring, is answered with refresh_health by design (the logging skill). All 6 failures were that designed reply.

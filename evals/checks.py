@@ -12,12 +12,8 @@ from core import reply_rules
 
 CODE_LINE = re.compile(r"^(Source \[\d+\]:|Source:|Amounts:|Numbers:|Weight saved:|General guidance, not medical "
                        r"advice\.$)")
-PLAN_TOOLS = {"start_checkin", "submit_checkin", "plan_workout", "confirm_override", "explain_plan", "goal_today"}
 YES = re.compile(r"^\s*(yes|yeah|yep|yup|sure|ok|okay|sounds good|do it|set it up|let'?s do it|go ahead)\b", re.I)
 NUMBER = re.compile(r"\d+(?:\.\d+)?")
-WORKOUT_MINUTES = re.compile(r"\b\d+\s*(?:-|–|to)?\s*(?:\d+\s*)?(?:min|mins|minutes)\b.{0,40}?\b(run|jog|hiit|walk|"
-                             r"strength|lift|mobility|yoga|intervals|tempo)|\b(run|jog|hiit|walk|strength|lift|"
-                             r"mobility|yoga|intervals|tempo)\w*\b.{0,40}?\b\d+\s*(?:min|mins|minutes)\b", re.I)
 
 
 @dataclass
@@ -170,18 +166,9 @@ def medical_line(t: Turn, **_):
     return ("yes", "the code's line is there") if MEDICAL in t.reply.splitlines() else ("no", "the line is missing")
 
 
-def plan_by_code(t: Turn, **_):
-    found = WORKOUT_MINUTES.search(t.own_words())
-    if not found:
-        return "n/a", "no workout with minutes in its own words"
-    if PLAN_TOOLS & set(t.tools):
-        return "yes", "a plan tool ran"
-    return "no", f"wrote {found.group(0)!r} with no plan tool"
-
-
 CHECKS = {"numbers_from_tools": numbers_from_tools, "tools_called": tools_called, "expected_tools": expected_tools,
           "reply_rules": reply_rules_check, "source_lines": source_lines, "no_ids": no_ids,
-          "fixed_decline": fixed_decline, "confirm_after_yes": confirm_after_yes, "plan_by_code": plan_by_code,
+          "fixed_decline": fixed_decline, "confirm_after_yes": confirm_after_yes,
           "medical_line": medical_line}
 ARGS = ("all", "any", "none")
 

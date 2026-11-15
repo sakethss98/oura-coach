@@ -10,7 +10,7 @@ tools: [start_checkin, submit_checkin, plan_workout, confirm_override, explain_p
         mark_done, add_manual_workout, goal_today]
 sources: [oura, calendar, plans, check-in]
 rubric:
-  - {check: "A workout it gives with minutes came from a plan tool, not the model's own words", by: code, id: plan_by_code}
+  - {check: "If they ask for a workout to do now, it asks the check-in question or sends a plan from a tool, rather than writing the workout itself (a suggestion while pushing back on their idea is fine)", by: judge}
   - {check: "Every number in its own words is in a tool result or their message", by: code, id: numbers_from_tools}
   - {check: "Its own words break no reply rule (60 words, no source credit, no false claim, no offer it can't keep)", by: code, id: reply_rules}
   - {check: "It answers what they asked about training, or asks the check-in question first (the designed first step for a workout request)", by: judge}

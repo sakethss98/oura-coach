@@ -91,9 +91,6 @@ def test_small_checks():
     assert checks.confirm_after_yes(turn("Done.", [result("confirm_goal")], "yes", asked))[0] == "yes"
     assert checks.confirm_after_yes(turn("Done.", [result("confirm_goal")], "half marathon in May"))[0] == "no"
     assert checks.confirm_after_yes(turn("Done."))[0] == "n/a"
-    assert checks.plan_by_code(turn("Do a 30 min easy run now."))[0] == "no"
-    assert checks.plan_by_code(turn("Do a 30 min easy run now.", [result("plan_workout")]))[0] == "yes"
-    assert checks.plan_by_code(turn("Rest well tonight."))[0] == "n/a"
 
 
 def test_a_skipped_judge_answer_shows_as_no(monkeypatch):
