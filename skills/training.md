@@ -3,9 +3,9 @@ name: training
 description: >-
   A workout now or a question about how to train: the check-in and its answer, a plan, "still want X?", "why?" about a plan, which workout or exercises to do.
 examples:
-  - "i am interested in a mild workout, what to do"
-  - "Give me a plan with a run followed by a weightlifting session."
-  - "I ran 3 days in a row, should tomorrow be legs instead?"
+  - "something easy today, what do you suggest?"
+  - "Plan me a run and then a gym session after it."
+  - "After three straight run days, should I lift legs tomorrow?"
 tools: [start_checkin, submit_checkin, plan_workout, confirm_override, explain_plan, get_today, refresh_health, workouts,
         mark_done, add_manual_workout, goal_today]
 sources: [oura, calendar, plans, check-in]

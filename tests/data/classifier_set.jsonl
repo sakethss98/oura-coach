@@ -64,7 +64,7 @@
 {"text": "how hard can I go today?", "categories": ["recovery_sleep"], "source": "scenario", "held_out": true}
 {"text": "what did I eat on Monday?", "categories": ["trends_patterns"], "source": "scenario"}
 {"text": "how's my day", "categories": ["trends_patterns"], "source": "scenario"}
-{"text": "How much protein did I have over the last week?", "categories": ["trends_patterns"], "source": "scenario"}
+{"text": "What was my protein intake across the past 7 days?", "categories": ["trends_patterns"], "source": "scenario"}
 {"text": "Summarize Oct 6", "categories": ["trends_patterns"], "source": "scenario"}
 {"text": "Which day this week was I lowest on protein?", "categories": ["trends_patterns"], "source": "scenario", "held_out": true}
 {"text": "Which days do I usually skip workouts?", "categories": ["trends_patterns"], "source": "scenario"}
@@ -83,10 +83,10 @@
 {"text": "yes", "categories": ["training"], "source": "scenario"}
 {"text": "Yes", "categories": ["nutrition"], "source": "scenario", "notes": ["The coach's last message before this conversation: 'Want an estimate for that smoothie?'"], "context": "smoothie"}
 {"text": "no", "categories": ["training"], "source": "scenario", "notes": ["A yes/no answer is awaited to the coach's question: \"I'd suggest a 30-min walk instead. Still want HIIT?\""], "context": "A yes/no answer is awaited"}
-{"text": "When did I sleep best this month, and what was different that day?", "categories": ["trends_patterns", "recovery_sleep"], "source": "scenario"}
+{"text": "Which night this month was my best sleep, and what was different about it?", "categories": ["trends_patterns", "recovery_sleep"], "source": "scenario"}
 {"text": "My long run is Saturday. What should I eat and drink Friday and Saturday?", "categories": ["fueling_hydration"], "source": "scenario"}
-{"text": "How long before a run should I have a coffee or energy drink?", "categories": ["fueling_hydration"], "source": "scenario"}
-{"text": "Do I need electrolytes for a 10k or is water fine?", "categories": ["fueling_hydration"], "source": "scenario", "held_out": true}
+{"text": "When should I drink coffee or an energy drink before a run so it helps?", "categories": ["fueling_hydration"], "source": "scenario"}
+{"text": "Is plain water enough for a 10k, or should I take electrolytes?", "categories": ["fueling_hydration"], "source": "scenario", "held_out": true}
 {"text": "And for Sunday instead?", "categories": ["fueling_hydration"], "source": "scenario", "prior_turns": [["them", "My long run is Saturday. What should I eat and drink Friday and Saturday?"], ["coach", "🏃 Run Sat Oct 10 · about 37 min\nFri: carbs 5–7 g per kg over the day.\nTell me your weight and I'll turn these into grams."]]}
 {"text": "I'm 62 kg", "categories": ["fueling_hydration"], "source": "scenario", "prior_turns": [["them", "My long run is Saturday. What should I eat and drink Friday and Saturday?"], ["coach", "🏃 Run Sat Oct 10 · about 37 min\nFri: carbs 5–7 g per kg over the day.\nTell me your weight and I'll turn these into grams."]]}
 {"text": "2 eggs, toast and chai at 8:10", "categories": ["logging"], "source": "scenario"}

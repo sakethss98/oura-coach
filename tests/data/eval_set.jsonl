@@ -1,5 +1,5 @@
 {"id": "G-1", "categories": ["nutrition"], "turns": [{"text": "simple dinner ideas, I have dal, rice and spinach", "at": "18:00"}, {"text": "give me the second one", "at": "18:01"}, {"text": "make it higher protein", "at": "18:02"}], "source": "scenario 5", "expect_tools": {"any": ["meal_recipe"]}}
-{"id": "G-2/G-4", "categories": ["fueling_hydration"], "turns": [{"text": "How long before a run should I have a coffee or energy drink?"}], "source": "M4-12", "checks": [{"check": "Its own line says something the plan doesn't, tied to their day", "by": "judge"}]}
+{"id": "G-2/G-4", "categories": ["fueling_hydration"], "turns": [{"text": "When should I drink coffee or an energy drink before a run so it helps?"}], "source": "M4-12", "checks": [{"check": "Its own line says something the plan doesn't, tied to their day", "by": "judge"}]}
 {"id": "G-3", "categories": ["fueling_hydration"], "turns": [{"text": "My long run is Saturday. What should I eat and drink Friday and Saturday?"}], "source": "M4-11", "expect_tools": {"any": ["get_today", "workouts"]}}
 {"id": "G-5", "categories": ["memory"], "turns": [{"text": "remember I'm away sometime soon"}], "source": "scenario 27", "checks": [{"check": "It asks which days they'll be away, as a question", "by": "judge"}]}
 {"id": "G-6", "categories": ["goal_program"], "turns": [{"text": "am I becoming a hybrid athlete by December?"}], "source": "E-10", "setup": ["run_history", "direction"], "checks": [{"check": "It says lifts, muscle or body composition aren't measured", "by": "judge"}]}
@@ -27,11 +27,11 @@
 {"id": "recovery-1", "categories": ["recovery_sleep"], "turns": [{"text": "how hard can I go today?"}], "source": "scenario messages"}
 {"id": "recovery-2", "categories": ["recovery_sleep"], "turns": [{"text": "Why is my HRV lower than usual today?"}], "source": "eval (new)"}
 {"id": "recovery-3", "categories": ["recovery_sleep"], "turns": [{"text": "Should I go to bed earlier tonight?", "at": "20:00"}], "source": "eval (new)"}
-{"id": "trends-1", "categories": ["trends_patterns"], "turns": [{"text": "How much protein did I have over the last week?"}], "source": "scenario messages", "setup": ["food_week"], "expect_tools": {"any": ["food_totals"]}}
+{"id": "trends-1", "categories": ["trends_patterns"], "turns": [{"text": "What was my protein intake across the past 7 days?"}], "source": "scenario messages", "setup": ["food_week"], "expect_tools": {"any": ["food_totals"]}}
 {"id": "trends-2", "categories": ["trends_patterns"], "turns": [{"text": "Which day this week was I lowest on protein?"}], "source": "scenario messages", "setup": ["food_week"]}
 {"id": "trends-3", "categories": ["trends_patterns"], "turns": [{"text": "Summarize Oct 6"}], "source": "scenario messages", "setup": ["food_week"]}
 {"id": "trends-4", "categories": ["trends_patterns", "recovery_sleep"], "turns": [{"text": "How did I sleep this week?"}], "source": "scenario messages"}
-{"id": "fueling-1", "categories": ["fueling_hydration"], "turns": [{"text": "Do I need electrolytes for a 10k or is water fine?"}], "source": "scenario messages"}
+{"id": "fueling-1", "categories": ["fueling_hydration"], "turns": [{"text": "Is plain water enough for a 10k, or should I take electrolytes?"}], "source": "scenario messages"}
 {"id": "goal-1", "categories": ["goal_program"], "turns": [{"text": "I want to run a half marathon on Feb 15 2027"}], "source": "scenario messages", "setup": ["run_history"], "expect_tools": {"all": ["create_goal"]}}
 {"id": "goal-2", "categories": ["goal_program"], "turns": [{"text": "what's today's session?"}], "source": "scenario messages", "setup": ["half_goal"], "expect_tools": {"any": ["goal_today"]}}
 {"id": "goal-3", "categories": ["goal_program"], "turns": [{"text": "am I on track?"}], "source": "scenario messages", "setup": ["half_goal"], "expect_tools": {"any": ["goal_status"]}}

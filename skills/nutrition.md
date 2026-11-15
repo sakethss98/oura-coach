@@ -3,9 +3,9 @@ name: nutrition
 description: >-
   What or how much to eat, what's left today, what they ate today, food they plan to eat, and any question about a food, drink or product (caffeine, protein, whether to have it).
 examples:
-  - "What should I eat?"
+  - "Any idea what I could eat now?"
   - "i made spinach dal yesterday; how much to eat for lunch with rice"
-  - "How much caffeine is present in Celsius live fit"
+  - "How much caffeine does a can of Red Bull have?"
 tools: [get_today, list_food, food_totals, suggest_meal, meal_recipe, food_facts]
 sources: [food log, targets, saved facts, USDA FoodData Central (food_facts)]
 rubric:

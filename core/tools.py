@@ -203,8 +203,8 @@ def health_range(config: RunnableConfig, metrics: list[HealthMetric] | None = No
                  start_text: str | None = None, end_text: str | None = None, group_by: GroupBy = None,
                  compare_days: bool = False) -> str:
     """Readiness, sleep, HRV, resting heart rate and steps over a range of days, with averages ("how did I sleep
-    this week?"). compare_days: true to get the best and worst day and what was different about each ("when did
-    I sleep best this month, and what was different that day?"). metrics: which ones, or null for readiness and
+    this week?"). compare_days: true to get the best and worst day and what was different about each ("which
+    night this month was my best sleep, and what was different?"). metrics: which ones, or null for readiness and
     sleep. At most the last 90 days."""
     t = turn(config)
     found = range_for(t, days_back, start_text, end_text)

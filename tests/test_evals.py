@@ -75,7 +75,7 @@ def test_tool_checks():
 
 
 def test_source_lines_for_markers_and_usda():
-    cited = "Carbs help [1].\nSource [1]: GSSI – Carbs https://www.gssiweb.org/en/a"
+    cited = "Carbs help [1].\nSource: GSSI – Carbs https://www.gssiweb.org/en/a"
     assert checks.source_lines(turn(cited))[0] == "yes"
     assert checks.source_lines(turn("Carbs help [1]."))[0] == "no"
     usda = [result("food_facts", json.dumps({"from_usda": True}), {"verbatim": "x", "source_line": "Numbers: USDA FoodData Central (Olive oil)"})]
@@ -171,3 +171,11 @@ def test_numbers_no_tool_gave_pass_only_when_the_judge_calls_them_general_advice
     [graded] = runner.grade(t, [check])
     assert graded["answer"] == "yes" and "20" in asked[0] and "general advice" in asked[0]
     assert "judge: a typical portion" in graded["reason"]
+
+
+def test_source_lines_beside_a_plan_and_with_two_markers():
+    plan = [result("fueling_plan", artifact={"verbatim": "Before: 1-4 g/kg."})]
+    assert checks.source_lines(turn("Before: 1-4 g/kg.\nSolid week [1].", plan))[0] == "no"          # G-4
+    two = "A [1]. B [2].\nSource [1]: GSSI – A https://x.org/a\nSource [2]: GSSI – B https://x.org/b"
+    assert checks.source_lines(turn(two))[0] == "yes"
+    assert checks.source_lines(turn("A [1]. B [2].\nSource [1]: GSSI – A https://x.org/a"))[0] == "no"

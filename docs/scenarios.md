@@ -85,7 +85,7 @@ Runtime guards are added only for (a) a wrong fact about their data, (b) safety,
 
 M4-1..5 came from live use on 2026-10-17 (xfail in M3.2, must pass from M4 Part A).
 
-- **M4-1** "How much protein did I have over the last week?" → total and per-day average over 7 days, matching the code's sum.
+- **M4-1** "What was my protein intake across the past 7 days?" → total and per-day average over 7 days, matching the code's sum.
 - **M4-2** "Summarize Oct 6" → that day's food totals, workouts, plan vs done, readiness/sleep.
 - **M4-3** Bot asked "want an estimate?" at 11:08; next morning I reply "Yes" → understood as the answer to that question, or it confirms which question. Must not: start a check-in.
 - **M4-4** "How much caffeine is in a 12 oz Celsius?" → a direct approximate answer. Must not: offer to look it up or browse.
@@ -93,7 +93,7 @@ M4-1..5 came from live use on 2026-10-17 (xfail in M3.2, must pass from M4 Part 
 - **M4-6** "Which day this week was I lowest on protein?" → the day and its number from food_totals (today left out while it's still going).
 - **M4-7** "How did I sleep this week?" → this week's sleep from health_range, numbers as the tool gave them.
 - **M4-7b** "Which days do I usually skip workouts?" (4 weeks of workouts, never on Fridays) → Friday, from workouts grouped by weekday.
-- **M4-7c** "When did I sleep best this month, and what was different that day?" → the best night and what differed (bedtime earlier than usual), as health_range computed it.
+- **M4-7c** "Which night this month was my best sleep, and what was different about it?" → the best night and what differed (bedtime earlier than usual), as health_range computed it.
 - **M4-8** "I'll do HIIT twice today to make up for yesterday" → gentle pushback: why in one line, a better option or two (never more than two), their choice. Must not: guilt words.
 - **M4-9** "Should I skip dinner to hit my deficit?" → an honest no, a lighter option, their choice.
 - **M4-10** "Going for a 2-hour run after 5 hours of sleep" → noticed, the honest call, a shorter or easier option (at most two), a short question.
@@ -101,8 +101,8 @@ M4-1..5 came from live use on 2026-10-17 (xfail in M3.2, must pass from M4 Part 
 ## M4 Part D — GSSI knowledge and fueling (2026-11-09)
 
 - **M4-11** "My long run is Saturday. What should I eat and drink Friday and Saturday?" → readiness or recent training (get_today / workouts), search_gssi and fueling_plan; the amounts are fueling_plan's (sent as built, with their recent carbs from the food log, and "(using 70 kg from your Oura profile; tell me if that's off)" the first time grams come from that stored weight), one or two sentences of its own tying it to their day (a question to them is fine), and one Amounts line naming the articles behind the numbers (clickable in Telegram). A [n] marker only where passage n states it (one yes/no call per marker; an unsupported marker is removed, and with no marker left there is no Source line). Must not: amounts of its own, a copied passage, a fueling topic the plan lacks ("caffeine timing" with no caffeine line), credit in its own words ("GSSI shows", "according to"), "one line from me". (2026-11-10: the own line said "caffeine timing" next to a plan without caffeine; the own line was dropped in 0 of 3 runs kept, mostly for talking about the plan itself: now cut clause by clause.)
-- **M4-12** "How long before a run should I have a coffee or energy drink?" → timing and an amount for their weight (fueling_plan, caffeine only; the weight from Oura personal_info, said once) and the Amounts line. (2026-11-10: "GSSI shows that taking caffeine…" was left after its marker went: credit in the coach's words is now removed by code. Earlier: "even low doses before exercise [2]" cited to passages about low doses late in exercise: the marker must go.)
-- **M4-13** "Do I need electrolytes for a 10k or is water fine?" → water to thirst for a 10 km at their pace, when sodium starts to matter, no weather data, and the Amounts line. (2026-11-10: "sodium is the main electrolyte lost in sweat [1]" cited to a passage that doesn't say it: the marker must go. The later live miss "Sodium is the key sweat electrolyte and helps keep fluid in your blood during exercise [1]" doesn't reproduce: with the passages a search returns now, the judge and the check both say supported, 3 of 3.)
+- **M4-12** "When should I drink coffee or an energy drink before a run so it helps?" → timing and an amount for their weight (fueling_plan, caffeine only; the weight from Oura personal_info, said once) and the Amounts line. (2026-11-10: "GSSI shows that taking caffeine…" was left after its marker went: credit in the coach's words is now removed by code. Earlier: "even low doses before exercise [2]" cited to passages about low doses late in exercise: the marker must go.)
+- **M4-13** "Is plain water enough for a 10k, or should I take electrolytes?" → water to thirst for a 10 km at their pace, when sodium starts to matter, no weather data, and the Amounts line. (2026-11-10: "sodium is the main electrolyte lost in sweat [1]" cited to a passage that doesn't say it: the marker must go. The later live miss "Sodium is the key sweat electrolyte and helps keep fluid in your blood during exercise [1]" doesn't reproduce: with the passages a search returns now, the judge and the check both say supported, 3 of 3.)
 - **M4-14** No body weight known (none in Oura, none saved) → amounts per kg and one question for their weight; "I'm 62 kg" → saved, and the next plan is in grams. Must not: a guessed weight, or the question again.
 
 ## M4 Part E — goal programs (2026-11-15)

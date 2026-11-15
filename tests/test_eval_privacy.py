@@ -50,3 +50,30 @@ def test_the_report_prints_totals_and_check_texts_never_a_message():
     text = run_evals.report([r], 1, "Evals test", {})
     assert secret not in text and "a private reply" not in text and "p-training-1" not in text
     assert "It answers what they asked about training" in text
+
+
+def _whole_phrase(message: str, text: str) -> bool:
+    """`message` appears as a whole phrase: not inside a word, and not the start of a longer sentence
+    ("what should I eat" in "what should I eat before a run" is a different question)."""
+    return re.search(rf"(?<![a-z0-9]){re.escape(message)}(?![a-z0-9]| [a-z0-9])", text) is not None
+
+
+def test_no_tracked_file_outside_data_and_tests_has_their_messages():
+    """Their messages (data/my_questions.txt, data/sample_questions.jsonl) never appear in a tracked file outside
+    data/ and tests/: examples in skills and prompts are paraphrases. Lines of 4+ words only ("Hi", "Yes",
+    "Last 7 days" are everyone's words)."""
+    import subprocess
+    messages = [m for m in their_messages() if len(m.split()) >= 4]
+    if not messages:
+        return                                        # not this person's checkout: nothing to compare
+    files = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True).stdout.split()
+    found = []
+    for name in files:
+        if name.startswith(("data/", "tests/")):
+            continue
+        try:
+            text = norm((ROOT / name).read_text())
+        except (UnicodeDecodeError, FileNotFoundError, IsADirectoryError):
+            continue
+        found += [f"{name}: {m}" for m in messages if _whole_phrase(m, text)]
+    assert not found, found

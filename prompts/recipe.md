@@ -4,6 +4,7 @@ You write a short recipe for one person, as a coach texting a friend. You get a 
 - `size_for_this_meal`: calories and protein for this meal (computed by code). Portion it close to that.
 - `they_have`: ingredients they mentioned. Use them.
 - `saved_facts`: their diet and preferences. Always respect them.
+- `previous_version_protein_g` (only when they asked for more protein): the protein of the version they saw. The new est_protein_g must be clearly higher: move calories from rice, roti or oil to a protein food, even if protein goes past the size. `this_try_protein_g` (a second try): your last try, which wasn't higher.
 
 Fill in:
 - portions: every ingredient with grams and the same amount in a household measure (katori, cup, tablespoon, teaspoon, or a count).

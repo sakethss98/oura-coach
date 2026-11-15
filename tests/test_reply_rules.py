@@ -190,26 +190,26 @@ def test_next_to_a_plan_at_most_two_sentences_without_recap_amounts_offers_or_ta
     from core.reply_rules import own_line
     draft = ("Day-before: carb-rich meals. Before: familiar carb meal a few hours out.\n"
              "Readiness is solid and the week was light, so you're set [1]. Any tweaks?")
-    assert own_line(draft) == "Readiness is solid and the week was light, so you're set [1]."
+    assert own_line(draft) == "Readiness is solid and the week was light, so you're set."      # no marker (G-4)
     assert own_line("Light week, so go for it. Aim for 60 g carbs. Want ideas?") == "Light week, so go for it."
     assert own_line("Have it a bit before (approx.). Low doses work [1]. More is no better.") == (
-        "Have it a bit before (approx.). Low doses work [1].")
+        "Have it a bit before (approx.). Low doses work.")
     assert own_line("During: nothing. Want ideas?") == ""
-    assert own_line("Caffeine guidance sent (see plan). Light week, so go for it [2].") == "Light week, so go for it [2]."
+    assert own_line("Caffeine guidance sent (see plan). Light week, so go for it [2].") == "Light week, so go for it."
     assert own_line("Plan computed without a saved body weight [2]. Day before: Friday [1].") == ""
     assert own_line("Got it. Read the plan and tell me if you want any swaps.") == "Got it."
     assert own_line("You likely won't need extra. Tell me your weight (kg or lb) and I'll give amounts.") == (
         "You likely won't need extra.")                       # the plan already asks for it, once
     # Clause by clause: what is left of a sentence stays, and a question to them stays.
-    assert own_line("Low doses work [1]; follow the timing in the plan I sent.") == "Low doses work [1]."
+    assert own_line("Low doses work [1]; follow the timing in the plan I sent.") == "Low doses work."
     assert own_line("Sodium helps you keep fluid [1], and sweat losses run high, so water is fine — is it hot "
-                    "where you run?") == ("Sodium helps you keep fluid [1], and sweat losses run high, so water is "
+                    "where you run?") == ("Sodium helps you keep fluid, and sweat losses run high, so water is "
                                           "fine — is it hot where you run?")
     assert own_line("Water is fine for that distance.\nDo you sweat a lot?") == (
         "Water is fine for that distance. Do you sweat a lot?")
     assert own_line("Water is fine — want a drink plan?") == "Water is fine."
     assert own_line("You already have the plan I built — quick notes: water is fine.") == "Quick notes: water is fine."
-    assert own_line("(Plan text just above.) Scale carbs to the run [1].") == "Scale carbs to the run [1]."
+    assert own_line("(Plan text just above.) Scale carbs to the run [1].") == "Scale carbs to the run."
 
 
 # The real Saturday plan for a 2:30 half (fueling.plan, 70 kg): its own line beside it has no numbers at all.
@@ -238,7 +238,7 @@ def test_next_to_a_plan_the_own_line_has_no_numbers():
     assert own_line("Start easy for the first 14 minutes — you've tapered well.") == "You've tapered well."
     assert own_line("Readiness is 75, so you're set — timing is 30–90 min before for many people.") == "You're set."
     assert own_line("Light week, so you're fresh [1]. Is it a hot-weather race?") == (
-        "Light week, so you're fresh [1]. Is it a hot-weather race?")             # a marker is not a number
+        "Light week, so you're fresh. Is it a hot-weather race?")       # a marker is not a number, and goes (G-4)
     assert has_digit("about 2:30") and not has_digit("light week [2]")
 
 

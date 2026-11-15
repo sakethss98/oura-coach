@@ -3,8 +3,8 @@ name: recovery_sleep
 description: >-
   How rested or recovered they are: readiness, sleep, HRV, tiredness, how hard they can go today, sleeping better.
 examples:
-  - "Why am I so tired today?"
-  - "How do I sleep better?"
+  - "I feel wiped out this morning, why?"
+  - "Any tips to get deeper sleep?"
   - "how hard can I go today?"
 tools: [get_today, health_range, refresh_health, workouts]
 sources: [oura]

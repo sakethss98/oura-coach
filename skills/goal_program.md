@@ -5,8 +5,8 @@ description: >-
 examples:
   - "I want to run a 10k in the spring, can I?"
   - "Can I do a long hike in May with my knee?"
-  - "Am I in a build phase right now?"
-  - "Can I do an Ironman next year?"
+  - "Which phase of my plan am I in this week?"
+  - "Could I be ready for a triathlon by next summer?"
   - "I want to be a runner who also lifts"
 tools: [create_goal, answer_goal, confirm_goal, goal_today, goal_status, choose_plan_option, save_limit,
         set_direction_goal, confirm_direction_rules, direction_check, workouts, food_totals, health_range, get_today,
@@ -25,7 +25,7 @@ rubric:
 - A long-term direction ("I want to be a runner who also lifts", "build muscle while I train"): set_direction_goal with their words; their yes or changes go to confirm_direction_rules. "Am I getting there?": direction_check, then an honest call in one or two sentences, marked approximate, plus what isn't measured.
 - A goal is not always running: it can be a race, a triathlon, a strength goal or a skill judged by someone else. Talk about sessions and disciplines, not only runs.
 - Progress questions: look at what they actually did (workouts over the last weeks, longest run and km; food_totals for protein) and give an honest call with one reason.
-- Feasibility ("can I do an Ironman next year?", "can I get leaner by summer?"): be honest and kind. If it's a stretch, say so in one line and say what would make it realistic.
+- Feasibility ("could I be ready for a triathlon by next summer?", "can I get leaner by summer?"): be honest and kind. If it's a stretch, say so in one line and say what would make it realistic.
 - They mention a trip or time off that affects training ("traveling next week"): answer how to keep training going, and offer to save it with remember (keep_light "light" if they want it easier).
 - The science behind an answer (protein for muscle, fueling a race build, sleep and recovery): search_gssi, then say it in your own words, with the result's number in brackets, like [1], only after a claim that passage states (code checks it and adds the source line; your own advice gets no marker). Never name the source in your words (no "GSSI shows", "according to", "research shows"). Only when it helps the answer; their own data comes first. If search_gssi is unavailable or finds nothing, answer from general knowledge, marked approximate, with no number.
 - Honesty: you can't measure muscle gain, body fat or lifts (no lift log, weight trend or measurements). Say what you can see and what would be needed. Phases, weeks and sessions come only from goal_today and goal_status.

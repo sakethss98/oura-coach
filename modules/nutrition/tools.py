@@ -189,8 +189,8 @@ Nutrient = Literal["calories", "protein_g", "carbs_g", "fiber_g", "caffeine_mg",
 def food_range(config: RunnableConfig, nutrients: list[Nutrient] | None = None, days_back: int | None = None,
                start_text: str | None = None, end_text: str | None = None, per_day: bool = False,
                group_by: GroupBy = None) -> str:
-    """Food over a range of days: totals, the average per logged day, and the lowest and highest day ("how much
-    protein did I have over the last week?", "which day this week was I lowest on protein?"). nutrients: which
+    """Food over a range of days: totals, the average per logged day, and the lowest and highest day ("what was
+    my protein over the past 7 days?", "which day this week was I lowest on protein?"). nutrients: which
     ones, or null for calories and protein. per_day: true to list each day. At most the last 90 days."""
     t = turn(config)
     found = range_for(t, days_back, start_text, end_text)
@@ -214,19 +214,20 @@ def suggest_meal(meal: str | None, ingredients: list[str] | None, constraints: s
     ideas = meals.suggest(t.user, t.day, t.now, t.use_fixtures, meal, ingredients, constraints)
     dishes = [o["dish"] for o in ideas["options"]]
     return (as_json({"sent_as_is": True, "options_in_order": dishes}),
-            {"verbatim": ideas["text"]})
+            {"verbatim": ideas["text"], "protein_by_dish": {o["dish"]: o.get("est_protein_g") for o in ideas["options"]}})
 
 
 @tool(response_format="content_and_artifact")
-def meal_recipe(dish: str, change: str | None, ingredients: list[str] | None,
+def meal_recipe(dish: str, change: str | None, ingredients: list[str] | None, state: Messages,
                 config: RunnableConfig) -> tuple[str, dict]:
     """The recipe for one dish, usually one of the meal ideas ("give me the second one"), with portions and
     steps. dish: its name exactly as in the ideas. change: how to revise the same dish ("higher protein",
     "no rice"), or null. ingredients: what they said they have, or null."""
     t = turn(config)
-    result = meals.recipe(t.user, t.day, t.now, t.use_fixtures, dish, change, ingredients)
+    result = meals.recipe(t.user, t.day, t.now, t.use_fixtures, dish, change, ingredients,
+                          meals.last_protein(state, dish))
     return (as_json({"sent_as_is": True, "dish": result["dish"]}),
-            {"verbatim": result["text"]})
+            {"verbatim": result["text"], "dish": result["dish"], "protein_g": result["protein_g"]})
 
 
 FuelPart = Literal["day_before", "before", "during", "fluids", "caffeine", "after"]

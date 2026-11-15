@@ -10,7 +10,8 @@ from dataclasses import dataclass, field
 
 from core import reply_rules
 
-CODE_LINE = re.compile(r"^(Source \[\d+\]:|Source:|Amounts:|Numbers:|Weight saved:)")
+CODE_LINE = re.compile(r"^(Source \[\d+\]:|Source:|Amounts:|Numbers:|Weight saved:|General guidance, not medical "
+                       r"advice\.$)")
 PLAN_TOOLS = {"start_checkin", "submit_checkin", "plan_workout", "confirm_override", "explain_plan", "goal_today"}
 YES = re.compile(r"^\s*(yes|yeah|yep|yup|sure|ok|okay|sounds good|do it|set it up|let'?s do it|go ahead)\b", re.I)
 NUMBER = re.compile(r"\d+(?:\.\d+)?")
@@ -118,14 +119,24 @@ def reply_rules_check(t: Turn, **_):
     return ("no", "; ".join(broken)[:300]) if broken else ("yes", "no rule broken")
 
 
+PLAN_TOOLS_WITH_AMOUNTS = {"fueling_plan", "save_body_weight"}      # core/agent.AMOUNT_TOOLS
+
+
 def source_lines(t: Turn, **_):
+    """Next to a code-built plan, no [n] at all (G-4); otherwise each [n] has its Source line, and a USDA lookup
+    its Numbers line."""
     body = "\n".join(line for line in t.reply.splitlines() if not CODE_LINE.match(line.strip()))
     markers = sorted(set(re.findall(r"\[(\d+)\]", body)))
+    beside_plan = any(r["name"] in PLAN_TOOLS_WITH_AMOUNTS and isinstance(r.get("artifact"), dict)
+                      and r["artifact"].get("verbatim") for r in t.tool_results)
+    if beside_plan and markers:
+        return "no", f"[n] marker(s) {markers} next to a code-built plan"
     usda = any(isinstance(r.get("artifact"), dict) and r["artifact"].get("source_line") for r in t.tool_results) \
         or '"from_usda": true' in t.tool_text()
     if not markers and not usda:
         return "n/a", "no [n] marker and nothing from USDA"
-    missing = [n for n in markers if not re.search(rf"^Source \[{n}\]: .*https?://", t.reply, re.M)]
+    # citations.finish numbers the lines ("Source [2]: …") when there are several or an Amounts line; else "Source: …"
+    missing = [n for n in markers if not re.search(rf"^Source(?: \[{n}\])?: .*https?://", t.reply, re.M)]
     if usda and "Numbers: USDA FoodData Central" not in t.reply:
         missing.append("the USDA FoodData Central line")
     return ("no", f"missing: {missing}") if missing else ("yes", "every marker and lookup has its line")
@@ -151,6 +162,14 @@ def confirm_after_yes(t: Turn, **_):
     return "no", "set up without the plan shown and a yes right after it"
 
 
+def medical_line(t: Turn, **_):
+    """core/agent.MEDICAL closes every pain, injury or illness answer that has words of the coach's own."""
+    from core.agent import MEDICAL
+    if not t.own_words():
+        return "n/a", "no guidance in its own words (only code-built text)"
+    return ("yes", "the code's line is there") if MEDICAL in t.reply.splitlines() else ("no", "the line is missing")
+
+
 def plan_by_code(t: Turn, **_):
     found = WORKOUT_MINUTES.search(t.own_words())
     if not found:
@@ -162,7 +181,8 @@ def plan_by_code(t: Turn, **_):
 
 CHECKS = {"numbers_from_tools": numbers_from_tools, "tools_called": tools_called, "expected_tools": expected_tools,
           "reply_rules": reply_rules_check, "source_lines": source_lines, "no_ids": no_ids,
-          "fixed_decline": fixed_decline, "confirm_after_yes": confirm_after_yes, "plan_by_code": plan_by_code}
+          "fixed_decline": fixed_decline, "confirm_after_yes": confirm_after_yes, "plan_by_code": plan_by_code,
+          "medical_line": medical_line}
 ARGS = ("all", "any", "none")
 
 

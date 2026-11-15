@@ -8,6 +8,7 @@ import pytest
 
 from connectors.health import Health, neutral_day
 from core import db
+from core.agent import MEDICAL
 from core.reply_rules import GUILT
 from modules.goals import direction, service
 from tests.conftest import call, judge, live, needs_fixtures, parsed_checkin, say
@@ -193,15 +194,24 @@ OFFER = "Sorry about the knee. Want me to plan around your knee, with no running
 def test_e_14_a_knee_limit_is_saved_on_yes_and_the_next_plan_has_no_run(coach, user, chat_model, fake_llm):
     chat = Chat(coach, user, chat_model)
     first = chat.send("my knee hurts when I run", 9, 0, [say(OFFER)])
-    assert first == OFFER and not db.active_limits(user.id)
+    assert first == f"{OFFER}\n\n{MEDICAL}" and not db.active_limits(user.id)
     saved = chat.send("yes", 9, 2, [call("save_limit", body_area="knee", kind="pain", avoid=["running_impact"],
                                          intensity_cap=None, start_text=None, end_text=None), say("")])
-    assert saved == "Saved: no running impact for your knee until you tell me it's better."
+    assert saved == "Saved: no running impact for your knee until you tell me it's better."   # no guidance: no line
     fake_llm.plan = fake_llm.plan.model_copy(update={"workout_type": "easy_run", "intensity": 3})
     chat.send("want to work out now", 9, 4, [call("start_checkin", request_text=None), say("")])
     chat.send("4 1", 9, 6, [call("submit_checkin", answer="4 1"), say("")])
     plan = db.latest_planned(user.id, at(9).date())["plan_json"]
     assert plan["workout_type"] in ("walk", "mobility")
+
+
+def test_a_pain_or_illness_answer_ends_with_the_codes_line_never_the_models_own(coach, user, chat_model):
+    reply = Chat(coach, user, chat_model).send("I have a cold, should I run?", 9, 0, [say(
+        "With only a runny nose, an easy 20 min jog is usually fine. This is not medical advice. "
+        "See a doctor if you get a fever. Easy jog or rest?")])
+    assert reply == ("With only a runny nose, an easy 20 min jog is usually fine. See a doctor if you get a fever. "
+                     f"Easy jog or rest?\n\n{MEDICAL}")
+    assert reply.count("medical advice") == 1
 
 
 def test_e_14_a_yes_to_the_offer_always_saves_the_limit(coach, user, chat_model):

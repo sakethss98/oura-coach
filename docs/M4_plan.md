@@ -38,7 +38,7 @@ M3.2 is done and tagged (`m3.2` = 00ed428; CLAUDE.md Status agrees). Live use af
 ## Part A — Fix pass + history tools
 
 **A1 History tools.** Pure math in new `history.py` files; the tools are thin wrappers.
-- `core/timeparse.resolve_range(days_back, start_text, end_text, today)` → `(start, end, note)`. It looks back only: "this week" = Mon…today, "last week" = previous Mon–Sun, "last 7 days", "Oct 1"–"Oct 10", start-only phrases. Ranges are capped at 90 days, and when that happens the note says "Only the last 90 days are covered." `days_back=7` = the 7 days ending today (today included, labeled "so far"). This matches the existing M4-1 test: 161 g, 23 g/day.
+- `core/timeparse.resolve_range(days_back, start_text, end_text, today)` → `(start, end, note)`. It looks back only: "this week" = Mon…today, "last week" = previous Mon–Sun, "the past 2 weeks", "Oct 1"–"Oct 10", start-only phrases. Ranges are capped at 90 days, and when that happens the note says "Only the last 90 days are covered." `days_back=7` = the 7 days ending today (today included, labeled "so far"). This matches the existing M4-1 test: 161 g, 23 g/day.
 - `food_totals(nutrients, days_back | start_text+end_text, per_day)`: **nutrition**, `modules/nutrition/history.py`. Sums, per-day average over the days with food logged (unlogged days are listed as "not logged", never counted as 0), lowest/highest day per nutrient (for "which day this week was I lowest on protein"), and optional per-day rows. Days come from `day_bounds`.
 - `workouts(days_back | range)`: **training**, `modules/training/history.py`. Per-day merged items via the existing `activity.oura_items / session_items / manual_items / merge_activity`, counts by type, total minutes, run km (Oura `distance`) and the longest run.
 - `health_range(metrics, days_back | range)`: **core** (device data, like recovery and movement). Readiness, sleep score, sleep hours, HRV, resting HR and steps per day, plus averages, built only from the `daily_metrics` fields.
@@ -54,14 +54,14 @@ M3.2 is done and tagged (`m3.2` = 00ed428; CLAUDE.md Status agrees). Live use af
     - that day's food (kcal, protein, caffeine, alcohol)
     - steps
   - The features come from one pure `history.day_features(user, day)` built on the modules' `summary()`.
-  - This answers "when did I sleep best this month and what was different?".
+  - This answers "which night this month was my best sleep, and what was different?".
   - `resolve_range` also reads "this month" and "last month".
 - Rules: user_id comes from the run config; dates are resolved in code; results are computed numbers, never raw rows. Each description is one line plus one example question.
 - Scenarios: M4-1 and M4-2 become must-pass. M4-2 uses a fixtures day ("Oct 6"), since Oct 10 is outside fixtures. New:
   - M4-6 "which day this week was I lowest on protein"
   - M4-7 "how did I sleep this week"
   - M4-7b "which days do I usually skip workouts?" (group_by weekday, synthetic 4 weeks)
-  - M4-7c "when did I sleep best this month, and what was different that day?" (best day + its differences, numbers equal to the tool's)
+  - M4-7c "which night this month was my best sleep, and what was different about it?" (best day + its differences, numbers equal to the tool's)
 
 **A2 Last question across a session reset.**
 - `chat_sessions.previous_question(user, session, now)`: the last message of the previous session, if it was the assistant's, contains "?", and is under 24 h old.
@@ -146,7 +146,7 @@ M3.2 is done and tagged (`m3.2` = 00ed428; CLAUDE.md Status agrees). Live use af
 - **Honesty rule** (in the bodies of `fueling_hydration`, `goal_program`, `trends_patterns`, `training`): the coach says what it can see and what it would need for things it has no source for.
   - Weather has no source yet.
   - Muscle gain and body composition can't be measured: there's no lift log, weight trend or measurements.
-  - Example: "Am I building muscle?" → strength sessions and protein days it can see + "to tell muscle gain I'd need lift weights or measurements". None of these sources is built in M4.
+  - Example: "Is my muscle going up?" → strength sessions and protein days it can see + "to tell muscle gain I'd need lift weights or measurements". None of these sources is built in M4.
 
 **C5 No regression, checked.**
 - In scripted tests, a fake classifier looks each message up in `classifier_set.jsonl` (an unlabeled message fails the test). Every scripted scenario therefore runs through its real route.

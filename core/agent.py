@@ -44,7 +44,7 @@ CONFIRM_PREVIOUS = "Just to check: do you mean my question from {when}: “{ques
 QUOTE_MAX_WORDS = 25
 HISTORY_HUMAN_TURNS = 5      # the agent sees the conversation from the 5th-last message they sent (~10 messages)
 # Tools that change something. When one of them ran next to a tool whose text is sent as is,
-# the agent's own line (e.g. "Logged 2 eggs.", or the answer to the rest of "done, what should I eat?")
+# the agent's own line (e.g. "Logged 2 eggs.", or the answer to the rest of "done, what do I eat now?")
 # is sent too, after the code-built text.
 WRITE_TOOLS = {"log_food", "edit_food", "remove_food", "remember", "forget", "add_manual_workout", "mark_done",
                "save_body_weight"}
@@ -393,6 +393,11 @@ def _turn_facts(turn_messages: list, messages: list) -> reply_rules.TurnFacts:
 
 
 WEIGHT_SAVED = "Weight saved: {kg:g} kg."
+# Pain, injury and illness answers (skill pain_injury) always end with this line, by code: it never depends on the
+# model remembering it. A disclaimer the model wrote itself is dropped, so the wording is always this one.
+MEDICAL_SKILL = "pain_injury"
+MEDICAL = "General guidance, not medical advice."
+OWN_DISCLAIMER = re.compile(r"\s*[^.!?\n]*\bmedical advice\b[^.!?\n]*[.!?]?", re.I)
 WEIGHT_SAID = re.compile(r"\bsaved\b", re.I)
 
 
@@ -479,7 +484,7 @@ def respond(state: AgentState, config) -> dict:
         their_message = next(m for m in reversed(state["messages"]) if isinstance(m, HumanMessage))
         asked = "?" in _text(their_message.content)             # they also asked something: keep the answer
         # The agent's line answers what code text didn't: a write code didn't confirm, or their question when no
-        # code text answers it ("done, what should I eat?" = mark_done's confirmation + suggest_meal's ideas: both
+        # code text answers it ("done, what do I eat now?" = mark_done's confirmation + suggest_meal's ideas: both
         # by code). A bare "done" gets mark_done's confirmation alone.
         covered = writes <= built_by & CONFIRMED_BY_TEXT
         answered = bool(built_by - WRITE_TOOLS - FACT_TOOLS)
@@ -500,8 +505,13 @@ def respond(state: AgentState, config) -> dict:
             parts.append(own)
     elif draft:
         parts.append(guarded(_within_rules(draft, tools_called, t, offered, sources, facts)))
-    weight = _saved_weight(turn_messages)
+    medical = MEDICAL_SKILL in (state.get("categories") or []) and not state.get("code_reply")
     built = len(dict.fromkeys(verbatim))                  # the code-built parts come first
+    if medical:
+        parts = parts[:built] + [OWN_DISCLAIMER.sub("", p).strip() for p in parts[built:]]
+        if any(parts[built:]):           # the coach gave guidance in its own words (not only a saved limit)
+            parts.append(MEDICAL)
+    weight = _saved_weight(turn_messages)
     if weight is not None and not state.get("code_reply") and not WEIGHT_SAID.search("\n".join(parts[built:])):
         parts.insert(built, WEIGHT_SAVED.format(kg=weight))   # a saved weight is always confirmed
     reply = "\n\n".join(p for p in parts if p) or NO_REPLY

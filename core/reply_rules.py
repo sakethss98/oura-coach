@@ -237,7 +237,9 @@ def own_line(text: str) -> str:
     """The coach's own line next to a code-built plan: at most two sentences, in order, qualitative only. Clause by
     clause it loses any number (every amount and time is in the plan; markers like [1] don't count), a recap of
     the plan, talk about the plan itself ("follow the plan I sent") and offers. A question to them stays ("Is it
-    hot where you run?")."""
+    hot where you run?"). It has no [n] marker (M4 G-4): the plan's Amounts line credits the source, and a line
+    about their day needs no citation; markers stay only in answers without a plan."""
+    text = re.sub(r"\s?\[\d{1,2}\]", "", text)
     sentences = [s for s in re.split(r"(?<=[.!?]\))\s+|(?<=[.!?])\s+|\n+", text.strip())   # "(… above.) Next"
                  if s and not RECAP.match(s)]
     kept = [k for k in (without_clauses(s, lambda c: has_digit(c) or ABOUT_THE_PLAN.search(c)

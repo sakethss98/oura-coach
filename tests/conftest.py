@@ -273,6 +273,7 @@ class FakeLLM:
                                        Portion(food="spinach", grams=100, household="2 cups")],
                              steps=["Rinse the dal and rice.", "Pressure cook with spinach for 3 whistles."],
                              est_calories=520, est_protein_g=24)
+        self.recipe_queue: list[Recipe] = []          # the next recipes, in order (then self.recipe)
         self.calls: list[tuple[str, str]] = []
 
     def kinds(self) -> list[str]:
@@ -300,7 +301,7 @@ class FakeLLM:
         if kind == "meal":
             return self.meal_queue.pop(0) if self.meal_queue else self.meal
         if kind == "recipe":
-            return self.recipe
+            return self.recipe_queue.pop(0) if self.recipe_queue else self.recipe
         raise AssertionError(f"unexpected LLM call {kind}")
 
 

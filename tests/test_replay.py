@@ -290,7 +290,8 @@ def test_4b_two_pizzas_and_the_model_guesses_nothing_is_removed(coach, user, cha
     assert food_today(user) == []
 
 
-def test_5_ideas_then_the_second_one_then_higher_protein_is_the_same_dish(coach, user, chat_model):
+def test_5_ideas_then_the_second_one_then_higher_protein_is_the_same_dish(coach, user, chat_model, fake_llm):
+    fake_llm.recipe_queue = [fake_llm.recipe, fake_llm.recipe.model_copy(update={"est_protein_g": 33})]
     chat = Chat(coach, user, chat_model)
     ideas_reply = chat.send("simple dinner ideas, I have dal, rice and spinach", 19, 0, [
         call("suggest_meal", meal="dinner", ingredients=["dal", "rice", "spinach"], constraints="simple"), say("")])
@@ -303,7 +304,8 @@ def test_5_ideas_then_the_second_one_then_higher_protein_is_the_same_dish(coach,
     assert recipe.startswith("Spinach moong dal khichdi · about")
     revised = chat.send("make it higher protein", 19, 2, [call("meal_recipe", dish=dish, change="higher protein",
                                                                ingredients=None), say("")])
-    assert revised.startswith("Spinach moong dal khichdi (higher protein)")
+    assert revised.startswith("Spinach moong dal khichdi (higher protein) · about 520 kcal, 33 g protein")
+    assert '"previous_version_protein_g": 24' in fake_llm.calls[-1][1]           # the version they saw
     assert plans_today(user) == [] and db.pending_plan(1) is None                  # must not: a workout plan
 
 
@@ -1466,7 +1468,7 @@ def a_week_of_dal():
 
 def test_m4_1_protein_over_the_last_week_is_the_codes_sum(coach, user, chat_model):
     a_week_of_dal()
-    Chat(coach, user, chat_model).send("How much protein did I have over the last week?", 18, 0, [
+    Chat(coach, user, chat_model).send("What was my protein intake across the past 7 days?", 18, 0, [
         call("food_totals", nutrients=["protein_g"], days_back=7), say("161 g protein in the last 7 days, about 23 g a day.")])
     result = last_tool_result(chat_model, "food_totals")
     assert (result["total"]["protein_g"], result["average_per_logged_day"]["protein_g"]) == (161, 23)
@@ -1577,7 +1579,7 @@ def test_m4_7b_which_days_do_i_usually_skip(coach, user, chat_model):
 
 
 def test_m4_7c_best_sleep_this_month_and_what_was_different(coach, user, chat_model):
-    Chat(coach, user, chat_model).send("When did I sleep best this month, and what was different that day?", 9, 0, [
+    Chat(coach, user, chat_model).send("Which night this month was my best sleep, and what was different about it?", 9, 0, [
         call("health_range", metrics=["sleep_score"], start_text="this month", compare_days=True),
         say("Best on Tuesday (90): you went to bed much earlier than usual.")])
     best = last_tool_result(chat_model, "health_range")["best_and_worst"]["sleep_score"]["best"]
@@ -1609,7 +1611,7 @@ def test_m4_8_9_10_pushback_is_kind_with_options(coach, user, chat_model, scenar
 @live
 def test_live_m4_1_protein_over_the_last_week(coach, user):
     a_week_of_dal()
-    reply = Chat(coach, user).send("How much protein did I have over the last week?", 18, 0)
+    reply = Chat(coach, user).send("What was my protein intake across the past 7 days?", 18, 0)
     assert "161" in reply and "23" in reply                                      # total 161 g, 23 g a day
 
 
@@ -1669,7 +1671,7 @@ def test_live_m4_7b_which_days_do_i_skip(coach, user):
 
 @live
 def test_live_m4_7c_best_sleep_and_what_was_different(coach, user):
-    reply = Chat(coach, user).send("When did I sleep best this month, and what was different that day?", 9, 0)
+    reply = Chat(coach, user).send("Which night this month was my best sleep, and what was different about it?", 9, 0)
     assert re.search(r"oct 6|tuesday|tue", reply, re.I) and re.search(r"bed|earlier", reply, re.I), reply
 
 
@@ -1707,8 +1709,8 @@ SCENARIOS_DOC = Path(__file__).resolve().parent.parent / "docs" / "scenarios.md"
 # --- M4 Part D: GSSI knowledge and fueling --------------------------------------------------------
 
 LONG_RUN_QUESTION = "My long run is Saturday. What should I eat and drink Friday and Saturday?"
-COFFEE_QUESTION = "How long before a run should I have a coffee or energy drink?"
-ELECTROLYTES_QUESTION = "Do I need electrolytes for a 10k or is water fine?"
+COFFEE_QUESTION = "When should I drink coffee or an energy drink before a run so it helps?"
+ELECTROLYTES_QUESTION = "Is plain water enough for a 10k, or should I take electrolytes?"
 
 
 def eat_carbs(day_offset: int, carbs: float):
@@ -1726,17 +1728,23 @@ def test_m4_11_long_run_fueling_is_the_codes_amounts_with_a_line_and_a_link(coac
         call("search_gssi", query="carbohydrate the day before a long run", k=4),
         call("fueling_plan", day_text="Saturday"), say(line)])
     plan, own = reply.split("\n\n")
-    own, source, amounts = own.split("\n")
+    own, amounts = own.split("\n")             # next to the plan: no [n] marker, so no Source line (G-4)
     assert plan.splitlines()[:2] == [
         "🏃 Run Sat Oct 10 · about 37 min (your longest run in the last 4 weeks; tell me if it's longer)",
         "Fri: no extra carbs needed, just your usual meals with carbs; lately about 180 g a day (3 days logged)."]
-    assert own == line and source == f"Source [1]: GSSI – Carbohydrate (test) <{GSSI_URLS['carbs']}>"
-    assert amounts.startswith("Amounts: GSSI – ") and amounts.count(" · ") == 2      # one line, the other 3 articles
+    assert own == line.replace(" [1]", "") and "Source [" not in reply
+    assert amounts.startswith("Amounts: GSSI – ") and amounts.count(" · ") == 3      # one line, all 4 articles
     assert fake_gssi == [("gssi", "search_gssi", {"query": "carbohydrate the day before a long run", "k": 4})]
 
 
-def test_m4_11_a_marker_the_passage_does_not_support_is_removed_and_the_sentence_stays(coach, user, chat_model,
-                                                                                      monkeypatch):
+def test_an_answer_without_a_plan_keeps_its_marker_and_source_line(coach, user, chat_model):
+    line = ("Eating enough carbohydrate the day before a long run helps you feel stronger late in the run [1].")
+    reply = Chat(coach, user, chat_model).send("am I becoming a hybrid athlete by December?", 9, 0, [
+        call("search_gssi", query="carbohydrate the day before a long run", k=4), say(line)])
+    assert reply.startswith(line) and f"Source: GSSI – Carbohydrate (test) <{GSSI_URLS['carbs']}>" in reply   # one
+
+
+def test_m4_11_next_to_a_plan_a_marker_is_removed_without_a_citation_check(coach, user, chat_model, monkeypatch):
     line = "Readiness is solid and the week was easy, so fuel up Friday and enjoy it [1]."   # about their day, not GSSI
     asked, scripted = [], citations.passage_states
 
@@ -1751,7 +1759,7 @@ def test_m4_11_a_marker_the_passage_does_not_support_is_removed_and_the_sentence
     own = reply.split("\n\n")[1].splitlines()
     assert own[0] == "Readiness is solid and the week was easy, so fuel up Friday and enjoy it."
     assert "Source" not in reply and own[1].startswith("Amounts: GSSI – Dietary Carbohydrate")   # amounts still cited
-    assert asked == ["Readiness is solid and the week was easy, so fuel up Friday and enjoy it"]   # one question
+    assert asked == []                          # the own line next to a plan carries no marker to check (G-4)
 
 
 def test_m4_11_a_copied_line_is_dropped_and_the_link_is_still_there(coach, user, chat_model):
@@ -1771,10 +1779,13 @@ def test_m4_12_coffee_before_a_run_is_timed_and_sized_for_their_weight(coach, us
     assert reply.startswith("Caffeine, if you use it: start low, 1.5–3 mg/kg → 100–210 mg; more doesn't help. Take "
                             "it about 60 min before the run")                                    # 69.9 kg
     assert reply.count("(using 70 kg from your Oura profile; tell me if that's off)") == 1    # said where, once
-    assert "helps many people [3].\nSource [3]: GSSI – Caffeine (test) <" + GSSI_URLS["caffeine"] + ">" in reply
-    assert reply.endswith("Amounts: GSSI – How Sleep Loss Undermines Nutritional Goals <https://www.gssiweb.org/en/"
-                          "sports-science-exchange/article/fueling-performance-starts-with-sleep--how-sleep-loss-"
-                          "undermines-nutritional-goals>")                                  # the timing's article
+    assert "helps many people." in reply and "Source [" not in reply and "gssiweb.org/en/sports-science-exchange/" \
+        "article/caffeine-and-exercise" not in reply.split("Amounts:")[0]          # the pasted url: gone, no marker
+    amounts = reply.splitlines()[-1]                          # the dose's and the timing's articles, by code
+    assert amounts.startswith("Amounts: GSSI – ") and "Caffeine And Exercise Performance" in amounts
+    assert amounts.endswith("How Sleep Loss Undermines Nutritional Goals <https://www.gssiweb.org/en/"
+                            "sports-science-exchange/article/fueling-performance-starts-with-sleep--how-sleep-loss-"
+                            "undermines-nutritional-goals>")
     assert "🏃" not in reply
     again = Chat(coach, user, chat_model).send(COFFEE_QUESTION, 7, 30, [call("fueling_plan", parts=["caffeine"]),
                                                                         say("")])
@@ -1792,7 +1803,7 @@ def test_m4_13_a_10k_drinks_to_thirst_and_says_there_is_no_weather_data(coach, u
         say("Drinking to thirst works well on shorter runs in mild weather [2], so for a 10k water is plenty.")])
     assert reply.startswith("🏃 Run of 10 km · about 65 min (10 km at your usual 6:30 per km)\n"
                             "Drink: to thirst; water is fine")
-    assert "no weather data" in reply and f"Source [2]: GSSI – Drinking (test) <{GSSI_URLS['drinking']}>" in reply
+    assert "no weather data" in reply and "[2]" not in reply and "Source [" not in reply   # beside the plan (G-4)
 
 
 def test_m4_13_without_a_usable_pace_it_asks_how_long_instead_of_guessing(coach, user, chat_model):

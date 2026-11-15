@@ -83,3 +83,36 @@ def test_a_recipe_keeps_the_dish_they_picked(user, fake_llm):
     text = meals.recipe(user, now.date(), now, True, "Spinach moong dal khichdi", "higher protein")["text"]
     assert text.splitlines()[0] == "Spinach moong dal khichdi (higher protein) · about 520 kcal, 24 g protein"
     assert "moong dal 60 g (1/3 cup dry)" in text and "1. Rinse the dal and rice." in text
+
+
+@needs_fixtures
+def test_higher_protein_is_said_only_when_the_new_version_has_more(user, fake_llm):
+    now = fixtures_now(time(19, 0))
+    dish = "Spinach moong dal khichdi"
+    fake_llm.recipe_queue = [fake_llm.recipe.model_copy(update={"est_protein_g": 31})]
+    text = meals.recipe(user, now.date(), now, True, dish, "higher protein", previous_protein_g=24)["text"]
+    assert text.startswith(f"{dish} (higher protein) · about 520 kcal, 31 g protein")
+    assert '"previous_version_protein_g": 24' in fake_llm.calls[-1][1]
+
+
+@needs_fixtures
+def test_a_version_that_isnt_higher_in_protein_never_gets_the_label(user, fake_llm):
+    now = fixtures_now(time(19, 0))
+    dish = "Masala egg bhurji with rice"
+    fake_llm.recipe_queue = [fake_llm.recipe.model_copy(update={"est_protein_g": p}) for p in (42, 43)]
+    text = meals.recipe(user, now.date(), now, True, dish, "higher protein", previous_protein_g=43)["text"]
+    assert text.startswith(f"{dish} · about 520 kcal, 43 g protein") and "(higher protein)" not in text
+    assert text.endswith(meals.NOT_HIGHER.format(new=43, old=43))
+    assert [k for k, _ in fake_llm.calls].count("recipe") == 2                 # asked once more first
+    assert '"this_try_protein_g": 42' in fake_llm.calls[-1][1]
+
+
+def test_the_previous_version_is_the_latest_recipe_else_its_meal_idea():
+    from langchain_core.messages import ToolMessage
+    idea = ToolMessage("{}", tool_call_id="1", name="suggest_meal",
+                       artifact={"verbatim": "…", "protein_by_dish": {"Spinach moong dal khichdi": 20, "Rajma": 18}})
+    first = ToolMessage("{}", tool_call_id="2", name="meal_recipe",
+                        artifact={"verbatim": "…", "dish": "Spinach moong dal khichdi", "protein_g": 24})
+    assert meals.last_protein([idea], "Spinach moong dal khichdi") == 20
+    assert meals.last_protein([idea, first], "Spinach moong dal khichdi") == 24
+    assert meals.last_protein([idea, first], "Paneer tikka") is None

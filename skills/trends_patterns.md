@@ -3,9 +3,9 @@ name: trends_patterns
 description: >-
   More than one day or a past day: totals, averages, comparisons, patterns and habits ("which days do I usually..."), a past day's summary or food, follow-ups about other days, and the daily score ("how's my day").
 examples:
-  - "How much protein did I have over the last week?"
-  - "Can you summarize of Oct 10?"
-  - "How did this week go compared to last week?"
+  - "What was my protein intake across the past 7 days?"
+  - "Give me a recap of Oct 3."
+  - "Was this week better or worse than the one before?"
 tools: [food_totals, workouts, health_range, day_summary, get_score, list_food, get_today]
 sources: [food log, oura, workouts, plans, daily scores]
 rubric:
