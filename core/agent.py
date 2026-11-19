@@ -377,6 +377,38 @@ def _within_rules(draft: str, tools_called: set[str], t, offered: set[str] | Non
 
 # Code-built facts that don't answer a "should I…?" on their own (food_facts' numbers): the agent's line stays.
 FACT_TOOLS = {"food_facts"}
+# "Should I have a Celsius now?": the answer opens the reply (yes, no or wait), before food_facts' numbers. When code
+# decided the call (modules/nutrition/caffeine.call), the line must open with it: one rewrite, else code's sentence.
+SHOULD_HAVE = re.compile(r"\b(should|can|could|shall|may) i (have|drink|eat|take|grab|get)\b|"
+                         r"\b(ok|okay|fine|alright|a good idea) to (have|drink|eat|take)\b|\bis it (ok|okay|fine)\b",
+                         re.I)
+OPENS = {"yes": re.compile(r"^\W*(yes|yep|yeah|sure|go (for it|ahead))\b", re.I),
+         "wait": re.compile(r"^\W*(wait|hold off|not yet)\b", re.I),
+         "no": re.compile(r"^\W*(no|nope|not (now|today|tonight|this late)|skip( it)?|i['’]?d skip)\b", re.I)}
+CALL_LINES = {"yes": "Yes: {reason}.", "wait": "Wait: {reason}.", "no": "Not now: {reason}."}
+
+
+def _opens_with(text: str, verdict: dict) -> bool:
+    return bool(OPENS[verdict["call"]].match(text)) and not any(
+        OPENS[other].match(text) for other in OPENS if other != verdict["call"] and other != "yes")
+
+
+def _with_call(own: str, verdict: dict, t) -> str:
+    """The agent's line, opening with code's call ("Wait: …"); one rewrite, then code's own sentence."""
+    if own and _opens_with(own, verdict):
+        return own
+    word = {"yes": "Yes", "wait": "Wait", "no": "Not now"}[verdict["call"]]
+    request = (f"Rewrite this reply so it starts with \"{word}\" and gives this reason in your own words: "
+               f"{verdict['reason']}. At most two short sentences, no numbers that aren't in the reason. Reply with the "
+               f"text only.\n\n{own}")
+    messages = [SystemMessage(load_prompt("agent")), HumanMessage(request)]
+    started = time.perf_counter()
+    response = make_model().invoke(messages)
+    rewrite = _text(response.content)
+    _log("agent_rewrite", messages, {"content": rewrite}, t, response, started)
+    if rewrite and _opens_with(rewrite, verdict) and not reply_rules.violations(rewrite, set(), None):
+        return rewrite
+    return CALL_LINES[verdict["call"]].format(reason=verdict["reason"])
 LOG_TOOLS = {"log_food", "add_manual_workout", "mark_done", "save_body_weight"}
 # Write tools whose code-built text is itself the confirmation ("Marked done: HIIT 12:12–1:03pm (from Oura).").
 # save_body_weight's text is the redone plan, so the agent still confirms the weight in a few words.
@@ -409,7 +441,17 @@ WEIGHT_SAVED = "Weight saved: {kg:g} kg."
 # model remembering it. A disclaimer the model wrote itself is dropped, so the wording is always this one.
 MEDICAL_SKILL = "pain_injury"
 MEDICAL = "General guidance, not medical advice."
+# Illness, pain or injury in their message gets the line too, whatever the route (safety).
+mentions_illness = reply_rules.mentions_illness
 OWN_DISCLAIMER = re.compile(r"\s*[^.!?\n]*\bmedical advice\b[^.!?\n]*[.!?]?", re.I)
+# A question whose answer needs lifts, muscle or body composition (none is measured): code says so in one line.
+MEASURE_ASK = re.compile(r"\b(muscles?|muscular|bulk(ing)?|(get|getting|become|becoming) (stronger|bigger)|"
+                         r"strength gains?|body ?fat|body composition|leaner|lean mass|toned|physique|six[- ]pack|"
+                         r"hybrid)\b", re.I)
+NOT_MEASURED = "Lifts and body composition aren't measured yet, so this goes by your sessions and food log."
+OWN_NOT_MEASURED = re.compile(r"\s*[^.!?\n]*\b(can['’]?t|cannot|can not|don['’]?t|do not|aren['’]?t|isn['’]?t|not|no)\b"
+                              r"[^.!?\n]*\b(measur\w*|see|track\w*|log(ged)?)\b[^.!?\n]*\b(lifts?|muscles?|body "
+                              r"(fat|composition|changes)|weights? lifted)\b[^.!?\n]*[.!?]?", re.I)
 WEIGHT_SAID = re.compile(r"\bsaved\b", re.I)
 
 
@@ -483,6 +525,7 @@ def respond(state: AgentState, config) -> dict:
         tool.name for tool in turn_setup(t, state.get("categories") or [skill_files.OTHER])[0]}
 
     parts = []
+    answer_first = False                        # "should I have it now?": the answer before food_facts' numbers
     if state.get("code_reply"):
         parts.append(draft)                     # built by code (greeting, confirmation), sent as is
     elif verbatim:
@@ -494,7 +537,8 @@ def respond(state: AgentState, config) -> dict:
                     and ((isinstance(m.artifact, dict) and m.artifact.get("wrote") is False) or _refused(m))}
         writes = (tools_called & WRITE_TOOLS) - no_write
         their_message = next(m for m in reversed(state["messages"]) if isinstance(m, HumanMessage))
-        asked = "?" in _text(their_message.content)             # they also asked something: keep the answer
+        should = bool(built_by & FACT_TOOLS) and bool(SHOULD_HAVE.search(_text(their_message.content)))
+        asked = "?" in _text(their_message.content) or should   # they also asked something: keep the answer
         # The agent's line answers what code text didn't: a write code didn't confirm, or their question when no
         # code text answers it ("done, what do I eat now?" = mark_done's confirmation + suggest_meal's ideas: both
         # by code). A bare "done" gets mark_done's confirmation alone.
@@ -515,17 +559,29 @@ def respond(state: AgentState, config) -> dict:
             if built_by & FACT_TOOLS:
                 own = reply_rules.fit_words(own, sum(len(v.split()) for v in dict.fromkeys(verbatim)), 2)
             parts.append(own)
+        verdict = next((m.artifact["call"] for m in turn_messages if isinstance(m, ToolMessage) and m.name in FACT_TOOLS
+                        and isinstance(m.artifact, dict) and m.artifact.get("call")), None)
+        if should and verdict:          # code decided: the line opens with its call (written, else code's sentence)
+            current = parts[-1] if len(parts) > len(dict.fromkeys(verbatim)) else ""
+            parts = parts[:len(dict.fromkeys(verbatim))] + [_with_call(current, verdict, t)]
+        answer_first = should and len(parts) > len(dict.fromkeys(verbatim))
     elif draft:
         parts.append(guarded(_within_rules(draft, tools_called, t, offered, sources, facts)))
-    medical = MEDICAL_SKILL in (state.get("categories") or []) and not state.get("code_reply")
+    their_text = _text(next(m for m in reversed(state["messages"]) if isinstance(m, HumanMessage)).content)
+    medical = (MEDICAL_SKILL in (state.get("categories") or []) or reply_rules.mentions_illness(their_text)) \
+        and not state.get("code_reply")
     built = len(dict.fromkeys(verbatim))                  # the code-built parts come first
-    if medical:
-        parts = parts[:built] + [OWN_DISCLAIMER.sub("", p).strip() for p in parts[built:]]
-        if any(parts[built:]):           # the coach gave guidance in its own words (not only a saved limit)
-            parts.append(MEDICAL)
+    if MEASURE_ASK.search(their_text) and not state.get("code_reply") \
+            and not any(OWN_NOT_MEASURED.search(v) for v in verbatim):     # code text that says it already
+        parts = parts[:built] + [OWN_NOT_MEASURED.sub("", p).strip() for p in parts[built:]] + [NOT_MEASURED]
+    if medical:                          # every pain, injury or illness answer, a saved limit included
+        parts = parts[:built] + [OWN_DISCLAIMER.sub("", p).strip() for p in parts[built:]] + [MEDICAL]
     weight = _saved_weight(turn_messages)
     if weight is not None and not state.get("code_reply") and not WEIGHT_SAID.search("\n".join(parts[built:])):
         parts.insert(built, WEIGHT_SAVED.format(kg=weight))   # a saved weight is always confirmed
+    if answer_first:
+        built_parts = len(dict.fromkeys(verbatim))
+        parts = [parts[built_parts]] + parts[:built_parts] + parts[built_parts + 1:]
     reply = "\n\n".join(p for p in parts if p) or NO_REPLY
     code_sources = list({s["url"]: s for m in turn_messages if isinstance(m, ToolMessage) and isinstance(m.artifact, dict)
                          for s in m.artifact.get("code_sources", [])}.values())

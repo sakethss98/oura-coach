@@ -11,7 +11,7 @@ sources: [food log, oura, workouts, plans, daily scores]
 rubric:
   - {check: "A history tool ran (food_totals, workouts, health_range, day_summary, get_score, list_food)", by: code, id: tools_called, any: [food_totals, workouts, health_range, day_summary, get_score, list_food]}
   - {check: "Every total, average and day named is in a tool result", by: code, id: numbers_from_tools}
-  - {check: "It says which days were not logged when that changes the answer", by: judge}
+  - {check: "When a day in the range has no food logged, it names that day (n/a when every day was logged)", by: judge}
   - {check: "When they ask how a period went or about a pattern, it names one takeaway, not just a list of numbers (n/a for a direct question like which day or how much)", by: judge}
 ---
 - Food over several days: food_totals. Workouts: workouts. Readiness, sleep, HRV, resting heart rate, steps: health_range. One past day as a whole ("summarize Oct 6"): day_summary. Food of one past day: list_food.

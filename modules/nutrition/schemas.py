@@ -53,15 +53,17 @@ class Portion(BaseModel):
     household: str = Field(description='the same amount in a household measure: "1 katori", "3/4 cup", "2 chapatis"')
 
 
-class MealOption(BaseModel):
-    dish: str = Field(description='a short dish name, e.g. "Dal palak with jeera rice"')
-    portions: list[Portion]
+class MealIdea(BaseModel):
+    """One line of a brainstorm: the dish and its rough numbers (the full recipe comes after they pick one)."""
+    dish: str = Field(description='the dish with its main parts in 2-7 words, e.g. "Paneer bhurji with 2 rotis"; only '
+                                  'when asked to improve a dish: that dish plus what you add ("<the dish> + <what you '
+                                  'add>")')
     est_calories: float = Field(ge=0)
     est_protein_g: float = Field(ge=0)
 
 
 class MealIdeas(BaseModel):
-    options: list[MealOption] = Field(description="1 or 2 different dishes")
+    options: list[MealIdea] = Field(description="2 or 3 different dishes")
 
 
 class Recipe(BaseModel):

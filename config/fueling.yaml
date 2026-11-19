@@ -40,7 +40,8 @@ race_day_before:
 # Before (practical applications): 1-4 g/kg, eaten 1-4 h before the start, for sessions over 60 min. No number
 # is given for shorter ones.
 before:
-  - {max_minutes: 60, g_per_kg: null, note: "your usual meal or snack is enough for a run under an hour", source: carbohydrate}
+  - {max_minutes: 60, g_per_kg: null, note: "your usual meal or snack is enough for a run under an hour", source: carbohydrate,
+     snack_minutes_before: [60, 90], ours: "the 60-90 min for a small snack before a short run is ours: GSSI gives no time under 60 min"}
   - {min_minutes: 60, hours: [1, 4], g_per_kg: [1, 4], source: carbohydrate}
 
 # Carbs during, g per hour (absolute, not per kg).
@@ -77,9 +78,26 @@ sodium:
 # The caffeine article gives no lead time; the sleep article reports the ISSN advice of taking it 60 min before
 # exercise (and that caffeine can disturb sleep).
 caffeine: {mg_per_kg: [1.5, 3], mg_fixed: [100, 200], minutes_before: 60, source: caffeine, timing_source: caffeine_timing}
+# Caffeine and their sleep, for "about 110 mg for you today" and "should I have a Celsius now?" (modules/nutrition/
+# caffeine.py). OUR RULES, not GSSI's numbers: the sleep article says to weigh caffeine timing against sleep (it lists a
+# study of caffeine taken 0, 3 or 6 h before bed) but gives no cutoff, and no GSSI article gives a daily maximum; 400 mg
+# a day is the FDA's general figure for healthy adults. The dose for them is the low end of the range above, rounded up
+# to 10 mg (never below the range).
+caffeine_sleep: {stop_hours_before_bed: 6, daily_max_mg: 400, wait_if_run_in_min: 90,
+                 ours: "the 6 h cutoff before their usual bedtime and the 400 mg a day are ours, not GSSI's"}
 
 # After (practical guidelines): 20-25 g of protein after a session, and with each main meal.
 after: {protein_g: [20, 25], source: protein}
 # Fast recovery (carbohydrate article, practical applications): after a hard, draining session, 1.0-1.2 g/kg of
 # carbs an hour for the first 4 h, then normal meals. Shown for a hard session again later the same day.
 recovery: {g_per_kg_per_hour: [1.0, 1.2], hours: 4, source: carbohydrate}
+
+# Real foods for the lines around a run (modules/nutrition/fueling_foods.py): their own most-logged foods when one
+# fits (carbs for the dinner before, a light carb snack before, protein after), else these, by goals.yaml
+# nutrition.diet. `after_eggs` only when a saved diet fact says they eat eggs. Food choices, not amounts: the amounts
+# stay GSSI's above.
+foods:
+  pick: {dinner_min_carbs_g: 40, dinner_hours: [17, 22], snack_min_carbs_g: 20, snack_max_kcal: 350,
+         snack_max_fiber_g: 5, after_min_protein_g: 15, look_back_days: 30}
+  vegetarian: {dinner: "dal with rice", snack: "a banana or toast", after: "Greek yogurt",
+               after_eggs: "2 eggs or Greek yogurt"}

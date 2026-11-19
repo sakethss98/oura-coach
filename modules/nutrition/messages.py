@@ -108,15 +108,21 @@ def _about(option: dict) -> str:
     return f" · about {option['est_calories']:.0f} kcal, {option['est_protein_g']:.0f} g protein"
 
 
-def format_meal_ideas(options: list[dict], size: dict | None, meal: str | None) -> str:
-    """Numbered dishes with portions in grams and a household measure, sized for one meal."""
+PICK_ONE = "Pick one for the recipe."
+
+
+def format_meal_ideas(options: list[dict], size: dict | None, meal: str | None, note: str | None = None) -> str:
+    """A brainstorm: 2-3 numbered one-line dishes with rough protein ("~42 g protein"), then "Pick one for the
+    recipe." The recipe (portions and steps) comes only after they pick one (meal_recipe)."""
     head = f"For {meal or 'your next meal'}"
     head += f", about {size['calories']} kcal and {size['protein_g']} g protein:" if size else ":"
     lines = [head]
     for n, o in enumerate(options, 1):
-        lines.append(f"{n}. {o['dish']}{_about(o)}")
-        if o["portions"]:
-            lines.append(f"   {_portions(o['portions'])}")
+        rough = f" · ~{o['est_protein_g']:.0f} g protein" if o.get("est_protein_g") is not None else ""
+        lines.append(f"{n}. {o['dish']}{rough}")
+    if note:
+        lines.append(note)
+    lines.append(PICK_ONE)
     return "\n".join(lines)
 
 

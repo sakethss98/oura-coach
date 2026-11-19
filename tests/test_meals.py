@@ -64,7 +64,21 @@ def test_ideas_are_sized_for_one_meal_and_built_on_what_they_log(user, fake_llm)
     sent = fake_llm.calls[-1][1]
     assert '"poha with peanuts"' in sent and '"spinach"' in sent and '"size_for_this_meal"' in sent
     assert result["text"].splitlines()[0].startswith("For dinner, about ")
-    assert result["text"].splitlines()[2] == "   cooked dal 200 g (1 katori) · chapati 80 g (2 chapatis)"
+    assert result["text"].splitlines()[1:] == ["1. Dal palak with jeera rice · ~25 g protein",       # one line each
+                                               "2. Spinach moong dal khichdi · ~25 g protein", "Pick one for the recipe."]
+
+
+@needs_fixtures
+def test_higher_protein_puts_the_same_dish_first_and_drops_lower_ones(user, fake_llm):
+    now = fixtures_now(time(19, 0))
+    fake_llm.meal_queue = [ideas("Paneer tikka with roti", protein=48)]
+    fake_llm.meal_queue[0].options += ideas("Masala egg bhurji + 100 g paneer", protein=55).options + \
+        ideas("Moong dal chilla", protein=30).options            # 30 < 43: not higher than what they saw
+    result = meals.suggest(user, now.date(), now, True, "dinner", improve={"dish": "Masala egg bhurji with rice",
+                                                                         "protein_g": 43})
+    assert [o["dish"] for o in result["options"]] == ["Masala egg bhurji + 100 g paneer", "Paneer tikka with roti"]
+    assert '"improve"' in fake_llm.calls[-1][1] and "Masala egg bhurji with rice" not in str(
+        __import__("json").loads(fake_llm.calls[-1][1])["do_not_suggest"])     # the dish itself isn't a repeat here
 
 
 @needs_fixtures

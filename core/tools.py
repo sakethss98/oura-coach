@@ -16,10 +16,13 @@ from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
 
 from connectors.health import Health
-from core import db, history, memory, score, users
+from core import db, history, memory, reply_rules, score, users
 from core.day import day_of
+from core.labels import clock
 from core.timeparse import resolve_dates, resolve_past_day, resolve_range
 from modules.registry import enabled_modules
+from modules.training.baseline import today_call
+from modules.training.blocks import DEFAULT_MINUTES
 import today   # the shared day view (root module, also used by the training planner)
 
 
@@ -134,7 +137,7 @@ def list_memory(config: RunnableConfig) -> str:
 # --- today's data -------------------------------------------------------------
 
 @tool
-def get_today(include_health: bool, config: RunnableConfig) -> str:
+def get_today(include_health: bool, state: Messages, config: RunnableConfig) -> str:
     """Today so far: food eaten (with ids), totals, daily targets and what is left, today's plans and
     workouts. include_health: true to also get readiness, sleep, HRV, steps (fetches Oura if needed)."""
     t = turn(config)
@@ -155,10 +158,30 @@ def get_today(include_health: bool, config: RunnableConfig) -> str:
             "readiness": o["readiness_score"], "sleep_score": o["sleep_score"], "sleep_hours": o["sleep_hours"],
             "hrv_ms": o["hrv_ms"], "resting_hr": o["resting_hr"], "steps": o["steps"],
             "how_hard_today": snap["band"]["plain"],
+            "today_call": _today_call(t, snap, state),
+            "usual_bedtime": clock(bed) if (bed := score.usual_bedtime_of(t.user, snap["oura"])) else None,
             "vs_usual": {k: {"today": v["today"], "usual": v["avg_7d"]}
                          for k, v in snap["baseline"]["comparison"].items()},
         }
     return as_json(data)
+
+
+UNWELL_CALL = {"effort": "easy", "workout": "rest, or an easy 20-min walk if you feel up to it", "from_program": False,
+               "when": "today", "borderline": False, "unwell": True}
+
+
+def _today_call(t, snap: dict, messages: list) -> dict:
+    """What to do today, by code: their program's session, else the band's steer (modules/training/baseline). If they
+    said in this conversation that they're sick, in pain or injured, the day is easy whatever the ring says (safety)."""
+    if any(isinstance(m, HumanMessage) and reply_rules.mentions_illness(str(m.content)) for m in messages):
+        return UNWELL_CALL
+    program = None
+    if "goals" in t.user.enabled_modules:
+        from modules.goals import service
+        program = service.today_request(t.user, t.day)
+    return today_call(snap["band"]["band"], snap["oura"]["today"]["readiness_score"],
+                      snap["goals"]["schedule"]["readiness_floor"], t.day.weekday(), snap["window"], program,
+                      DEFAULT_MINUTES)
 
 
 @tool

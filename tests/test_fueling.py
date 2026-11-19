@@ -1,10 +1,10 @@
 """Fueling amounts (modules/nutrition/fueling.py): pure math over config/fueling.yaml. Every range cites a
 GSSI article from docs/gssi_sources.txt; grams only with a known weight; the run's minutes from their
 words, their pace or their longest recent run."""
-from datetime import date
+from datetime import date, datetime
 
 from mcp_servers.gssi.ingest import normalize, read_sources
-from modules.nutrition import fueling
+from modules.nutrition import caffeine, fueling, fueling_foods
 from tests.test_gssi_index import SOURCES
 
 MON = date(2026, 11, 9)
@@ -103,10 +103,11 @@ def test_a_race_of_90_minutes_or_more_is_carb_loading():
 
 def test_only_the_parts_asked_for():
     caffeine = fueling.plan(40, "x", 70, ["caffeine"], None, MON)
-    assert caffeine["amounts"] == {"caffeine_mg": [100, 210], "caffeine_minutes_before": 60}
-    assert caffeine["text"] == ("Caffeine, if you use it: start low, 1.5–3 mg/kg → 100–210 mg; more doesn't help. Take "
-                                "it about 60 min before the run (or late in a long one). Try it in training first.")
-    assert "about 100–200 mg" in fueling.plan(40, "x", None, ["caffeine"], None, MON)["text"]
+    assert caffeine["amounts"] == {"caffeine_mg": [105, 210], "caffeine_minutes_before": 60, "caffeine_for_you_mg": 110}
+    assert caffeine["text"] == ("Caffeine, if you use it: about 110 mg for you today, about 60 min before the run (or "
+                                "late in a long one). Start low (1.5–3 mg/kg → 105–210 mg); more doesn't help. Try it "
+                                "in training first.")
+    assert "about 100 mg for you today" in fueling.plan(40, "x", None, ["caffeine"], None, MON)["text"]
     fluids = fueling.plan(62, "10 km at your usual 6:12 per km", 70, ["fluids"], None, MON, distance_km=10)
     assert fluids["text"].splitlines()[0] == "🏃 Run of 10 km · about 62 min (10 km at your usual 6:12 per km)"
     assert "water is fine" in fluids["text"] and "sodium_mg_per_liter" not in fluids["amounts"]
@@ -127,3 +128,104 @@ def test_run_minutes_their_words_then_pace_then_longest_run():
 def test_recent_carbs_count_only_logged_days():
     assert fueling.recent_carbs({"a": 200, "b": None, "c": 160}) == {"average_g": 180, "days": 2}
     assert fueling.recent_carbs({"a": 200, "b": None}) is None
+
+
+# --- H-6: the caffeine line is theirs (weight, caffeine so far, hours to their usual bedtime) -------------------
+
+BED = datetime(2026, 11, 9, 23, 30)
+
+
+def caffeine_text(kg=70, **day) -> str:
+    return fueling.plan(40, "x", kg, ["caffeine"], None, MON, caffeine_day={"today": True, "so_far_mg": 0,
+                                                                             "hours_to_bed": 14, "bedtime": BED,
+                                                                             **day})["text"]
+
+
+def test_the_dose_for_them_never_rounds_below_the_range():
+    assert caffeine.low_end([105, 210]) == 110 and caffeine.low_end([100, 200]) == 100 and caffeine.low_end([91, 182]) == 100
+    assert "about 110 mg for you today" in caffeine_text(70)          # 1.5 mg/kg x 70 kg = 105 mg -> 110, not 100
+    assert "about 90 mg for you today" in caffeine_text(60)           # 90 exactly
+
+
+def test_caffeine_so_far_and_their_bedtime_change_the_line():
+    assert "about 110 mg for you today (with the 80 mg you've had today)" in caffeine_text(so_far_mg=80)
+    assert caffeine_text(so_far_mg=350) == "Caffeine: skip more today: you've had about 350 mg already."
+    assert caffeine_text(hours_to_bed=4) == ("Caffeine: skip it today: your usual bedtime (11:30pm) is about 4 h away, "
+                                             "and caffeine this late can cut into your sleep.")
+    later = fueling.plan(40, "x", 70, ["caffeine"], SAT, MON, caffeine_day={"today": False, "so_far_mg": 300,
+                                                                            "hours_to_bed": None, "bedtime": BED})
+    assert "about 110 mg for you on Sat," in later["text"] and later["text"].endswith(
+        "Keep it at least 6 h before your usual 11:30pm bedtime.")       # another day: today's caffeine doesn't count
+
+
+def test_hours_until_their_usual_bedtime():
+    assert caffeine.hours_until(BED, datetime(2026, 11, 9, 19, 30)) == 4.0
+    assert caffeine.hours_until(datetime(2026, 11, 9, 1, 19), datetime(2026, 11, 9, 9, 0)) == 16.3
+    assert caffeine.hours_until(BED, datetime(2026, 11, 10, 0, 30)) == 0.0      # past bedtime tonight
+    assert caffeine.hours_until(None, datetime(2026, 11, 9, 9, 0)) is None
+
+
+# --- H-3: should I have it now? (code decides where a rule applies) --------------------------------------------
+
+RULES = fueling.rules()["caffeine_sleep"]
+CAPS = [{"within_min": 60, "min_calories": 400, "max_intensity": 2}, {"within_min": 30, "min_calories": 150,
+                                                                       "max_intensity": 3}]
+
+
+def should(item_mg=200, kcal=10, so_far=0, hour=9, run=None, bedtime=BED):
+    return caffeine.call(item_mg, kcal, so_far, datetime(2026, 11, 9, hour, 0), bedtime, run, RULES, 60, CAPS)
+
+
+def test_a_caffeinated_drink_is_yes_in_the_morning_no_near_bedtime_wait_before_a_run():
+    assert should() == {"call": "yes", "reason": "it's 9:00am, well before your usual 11:30pm bedtime, and you've had "
+                                                 "no caffeine yet today"}
+    assert should(hour=20)["call"] == "no" and "usual bedtime (11:30pm) is about 4 h away" in should(hour=20)["reason"]
+    assert should(so_far=300) == {"call": "no", "reason": "you've had about 300 mg of caffeine today, and this would "
+                                                          "make 500 mg"}
+    run = {"label": "easy run", "start": datetime(2026, 11, 9, 11, 30)}
+    assert should(run=run) == {"call": "wait", "reason": "have it around 10:30am, about 60 min before your easy run at "
+                                                         "11:30am"}
+    assert should(run={"label": "easy run", "start": datetime(2026, 11, 9, 10, 0)})["call"] == "yes"   # in an hour: fine
+    assert should(bedtime=None)["reason"] == "it's 9:00am, and you've had no caffeine yet today"
+
+
+def test_food_without_caffeine_waits_only_before_a_run():
+    run = {"label": "HIIT", "start": datetime(2026, 11, 9, 9, 45)}
+    assert should(item_mg=0, kcal=600, run=run) == {"call": "wait", "reason": "your HIIT starts at 9:45am, so have it after"}
+    assert should(item_mg=0, kcal=100, run=run) is None                # a small snack: no rule of ours
+    assert should(item_mg=0, kcal=600) is None
+
+
+# --- H-7: real foods in the fueling lines ----------------------------------------------------------------------
+
+FOOD_RULES = fueling.rules()["foods"]
+
+
+def entry(text, hour, kind="meal", carbs=60, kcal=500, fiber=4, protein=12):
+    return {"raw_text": text, "timestamp": f"2026-11-0{hour % 9 + 1}T{hour:02d}:00:00-06:00", "entry_type": kind,
+            "est_carbs_g": carbs, "est_calories": kcal, "est_fiber_g": fiber, "est_protein_g": protein}
+
+
+def test_their_most_logged_foods_are_picked_else_the_diet_fallbacks():
+    log = [entry("had dal and rice for dinner", 20), entry("dal and rice", 19), entry("pasta", 20),
+           entry("banana", 8, "snack", carbs=27, kcal=105, fiber=3), entry("2 eggs", 8, "snack", carbs=1, protein=13),
+           entry("Greek yogurt", 16, "snack", carbs=6, kcal=150, protein=17)]
+    picked = fueling_foods.pick(log, FOOD_RULES, "vegetarian", eats_eggs=True)
+    assert picked == {"dinner": {"food": "dal and rice", "usual": True}, "snack": {"food": "banana", "usual": True},
+                      "after": {"food": "Greek yogurt", "usual": True}}
+    empty = fueling_foods.pick([], FOOD_RULES, "vegetarian", eats_eggs=True)
+    assert [fueling_foods.phrase(f) for f in empty.values()] == ["dal with rice", "a banana or toast",
+                                                                 "2 eggs or Greek yogurt"]
+    assert fueling_foods.pick([], FOOD_RULES, "vegetarian", eats_eggs=False)["after"]["food"] == "Greek yogurt"
+
+
+def test_a_short_saturday_run_names_real_foods_and_timing_and_no_carb_loading():
+    foods = fueling_foods.pick([entry("dal + rice", 20)], FOOD_RULES, "vegetarian", eats_eggs=True)
+    result = fueling.plan(37, "x", 70, None, SAT, MON, foods=foods)
+    lines = result["text"].splitlines()
+    assert "Fri dinner: your usual dal + rice (no extra carbs needed for a run under 90 min)." in lines
+    assert "Sat, 60–90 min before: a banana or toast, if you want something." in lines
+    assert any(line.startswith("After: 20–25 g protein (2 eggs or Greek yogurt works), with carbs") for line in lines)
+    assert result["carb_load"] is False
+    long = fueling.plan(100, "x", 70, ["day_before"], SAT, MON, foods=foods)
+    assert long["text"].endswith("; at dinner, your usual dal + rice.") and long["carb_load"] is True

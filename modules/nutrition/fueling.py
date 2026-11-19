@@ -14,7 +14,9 @@ from functools import lru_cache
 import yaml
 
 from core.config import ROOT
+from core.labels import clock
 from modules.goals.paces import easy_pace
+from modules.nutrition import caffeine, fueling_foods
 
 RULES_PATH = ROOT / "config" / "fueling.yaml"
 PARTS = ("day_before", "before", "during", "fluids", "caffeine", "after")
@@ -85,11 +87,14 @@ def recent_carbs(carbs_by_day: dict[str, float | None]) -> dict | None:
 
 def plan(minutes: int, how: str, weight_kg: float | None, parts: list[str] | None, run_day: date | None,
          today: date, carbs_lately: dict | None = None, race: bool = False, ask_weight: bool = False,
-         distance_km: float | None = None, weight_from: str | None = None) -> dict:
+         distance_km: float | None = None, weight_from: str | None = None, caffeine_day: dict | None = None,
+         foods: dict | None = None) -> dict:
     """{"text": lines sent as built, "amounts": the numbers, "sources": {part: url}, "source_list": [{title, url}]
     (the articles behind the amounts, in order), "carb_load": True/False when the day before is in the plan
     (False = no extra carbs), "per_kg": bool}. weight_from: where a stored weight came from ("from your Oura
-    profile"), said once under amounts made from it; None = don't say it (they just told us)."""
+    profile"), said once under amounts made from it; None = don't say it (they just told us).
+    caffeine_day: {"today": the run is today, "so_far_mg", "hours_to_bed" (when they'd take it), "bedtime": their
+    usual bedtime (a datetime) or None}. foods: real foods for the lines (fueling_foods.pick), or None."""
     r = rules()
     kg = weight_kg
     parts = [p for p in (parts or DEFAULT_PARTS) if p in PARTS]
@@ -120,8 +125,16 @@ def plan(minutes: int, how: str, weight_kg: float | None, parts: list[str] | Non
             line = f"{label}: carb loading, {per(rule['g_per_kg'], grams_)} a day"
         else:
             label = f"{run_day - timedelta(days=1):%a}" if run_day else "The day before"
-            line = (f"{label}: carbs {per(rule['g_per_kg'], grams_)} over the day, {rule['note']}" if rule["g_per_kg"]
-                    else f"{label}: {rule['note']}")
+            if rule["g_per_kg"]:
+                line = f"{label}: carbs {per(rule['g_per_kg'], grams_)} over the day, {rule['note']}"
+                if foods:
+                    line += f"; at dinner, {fueling_foods.phrase(foods['dinner'])}"
+            elif foods:          # no extra carbs: a real dinner, and why nothing more is needed
+                under = f"a {'race' if race else 'run'} under {rule['max_minutes']} min"
+                line = (f"{label} dinner: {fueling_foods.phrase(foods['dinner'])} (no "
+                        f"{'carb loading' if race else 'extra carbs'} needed for {under})")
+            else:
+                line = f"{label}: {rule['note']}"
         if carbs_lately:
             line += f"; lately about {carbs_lately['average_g']} g a day ({carbs_lately['days']} days logged)"
         lines.append(line + ".")
@@ -133,10 +146,15 @@ def plan(minutes: int, how: str, weight_kg: float | None, parts: list[str] | Non
             grams_ = _grams(rule["g_per_kg"], kg)
             amounts["before_g"] = grams_
             lines.append(f"{day + ', ' if day else ''}{_span(*rule['hours'])} h before: carbs "
-                         f"{per(rule['g_per_kg'], grams_)}, less the closer to the start; easy on fat and fiber.")
+                         f"{per(rule['g_per_kg'], grams_)}, less the closer to the start; easy on fat and fiber"
+                         + (f" ({fueling_foods.phrase(foods['snack'])} works)" if foods else "") + ".")
         else:
             amounts["before_g"] = None
-            lines.append(f"{day + ', before' if day else 'Before'}: {rule['note']}.")
+            if foods and rule.get("snack_minutes_before"):
+                lines.append(f"{day + ', ' if day else ''}{_span(*rule['snack_minutes_before'])} min before: "
+                             f"{fueling_foods.phrase(foods['snack'])}, if you want something.")
+            else:
+                lines.append(f"{day + ', before' if day else 'Before'}: {rule['note']}.")
 
     if "during" in parts:
         rule = pick(r["during"], minutes, distance_km)
@@ -173,16 +191,33 @@ def plan(minutes: int, how: str, weight_kg: float | None, parts: list[str] | Non
         lines.append(line + ". I have no weather data: drink more on a hot day.")
 
     if "caffeine" in parts:
-        rule = r["caffeine"]
+        rule, sleep = r["caffeine"], r["caffeine_sleep"]
         sources["caffeine"] = r["sources"][rule["source"]]
-        mg = _grams(rule["mg_per_kg"], kg, 10)
+        mg = _grams(rule["mg_per_kg"], kg, 5)
         amounts["caffeine_mg"] = mg
-        dose = (f"{_span(*rule['mg_per_kg'])} mg/kg → {_span(*mg)} mg" if mg
-                else f"about {_span(*rule['mg_fixed'])} mg ({_span(*rule['mg_per_kg'])} mg/kg)")
+        span = (f"{_span(*rule['mg_per_kg'])} mg/kg → {_span(*mg)} mg" if mg
+                else f"about {_span(*rule['mg_fixed'])} mg, {_span(*rule['mg_per_kg'])} mg/kg")
         sources["caffeine_timing"] = r["sources"][rule["timing_source"]]
         amounts["caffeine_minutes_before"] = rule["minutes_before"]
-        lines.append(f"Caffeine, if you use it: start low, {dose}; more doesn't help. Take it about "
-                     f"{rule['minutes_before']} min before the run (or late in a long one). Try it in training first.")
+        day = caffeine_day or {}
+        on_the_day = day.get("today", True)          # the run is today (or no day given): their day so far counts
+        so_far = (day.get("so_far_mg") or 0) if on_the_day else 0
+        mine = caffeine.dose(mg or rule["mg_fixed"], so_far, day.get("hours_to_bed") if on_the_day else None, sleep)
+        amounts["caffeine_for_you_mg"] = mine["mg"]
+        bed = clock(day["bedtime"]) if day.get("bedtime") else None
+        if mine["skip"] == "bedtime":
+            lines.append(f"Caffeine: skip it today: your usual bedtime ({bed}) is "
+                         f"{caffeine._hours(day['hours_to_bed'])} away, and caffeine this late can cut into your sleep.")
+        elif mine["skip"] == "daily_max":
+            lines.append(f"Caffeine: skip more today: you've had about {so_far:.0f} mg already.")
+        else:
+            when = "today" if on_the_day else f"on {run_day:%a}" if run_day else "for the run"
+            had = f" (with the {so_far:.0f} mg you've had today)" if so_far else ""
+            later = (f" Keep it at least {sleep['stop_hours_before_bed']} h before your usual {bed} bedtime."
+                     if bed and not on_the_day else "")
+            lines.append(f"Caffeine, if you use it: about {mine['mg']} mg for you {when}{had}, about "
+                         f"{rule['minutes_before']} min before the run (or late in a long one). Start low ({span}); more "
+                         f"doesn't help. Try it in training first.{later}")
 
     if "after" in parts:
         rule = r["after"]
@@ -194,7 +229,8 @@ def plan(minutes: int, how: str, weight_kg: float | None, parts: list[str] | Non
         amounts["recovery_g_per_hour"] = per_hour
         rate = (f"{_span(*fast['g_per_kg_per_hour'])} g/kg an hour → {_span(*per_hour)} g an hour" if per_hour
                 else f"{_span(*fast['g_per_kg_per_hour'])} g per kg an hour")
-        lines.append(f"After: {_span(*rule['protein_g'])} g protein, with carbs, at your next meal or snack. Training "
+        food = f" ({fueling_foods.phrase(foods['after'])} works)" if foods else ""
+        lines.append(f"After: {_span(*rule['protein_g'])} g protein{food}, with carbs, at your next meal or snack. Training "
                      f"hard again later that day? Carbs {rate} for the first {fast['hours']} h.")
 
     if kg is None and ask_weight:

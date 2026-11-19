@@ -113,3 +113,10 @@
 {"text": "had one at 9", "categories": ["logging"], "source": "scenario"}
 {"text": "200 g chicken breast, a cup of rice and a tablespoon of olive oil for lunch", "categories": ["logging"], "source": "scenario"}
 {"text": "should I have a Chobani plain Greek yogurt now?", "categories": ["nutrition"], "source": "scenario"}
+{"text": "the first one", "categories": ["nutrition"], "source": "scenario", "context": "Pick one for the recipe.", "prior_turns": [["them", "make it higher protein"], ["coach", "For dinner, about 600 kcal and 30 g protein:\n1. Spinach moong dal khichdi + 100 g paneer \u00b7 ~38 g protein\n2. Paneer tikka with roti \u00b7 ~35 g protein\nPick one for the recipe."]]}
+{"text": "3 1 sore throat", "categories": ["training"], "source": "scenario", "notes": ["A check-in answer (energy 1-5 and soreness 0-5) is awaited."]}
+{"text": "4 2 sore legs", "categories": ["training"], "source": "scenario", "notes": ["A check-in answer (energy 1-5 and soreness 0-5) is awaited."]}
+{"text": "am I building muscle with my runs and lifts?", "categories": ["goal_program"], "source": "scenario"}
+{"text": "Why is my HRV lower than usual today?", "categories": ["recovery_sleep"], "source": "scenario"}
+{"text": "what can I make with paneer and spinach?", "categories": ["nutrition"], "source": "scenario"}
+{"text": "I've got a fever and a sore throat, can I still run today?", "categories": ["pain_injury"], "source": "added"}

@@ -3,7 +3,8 @@
 - At most 3 lines and about 60 words.
 - Plain words: no internal terms (band labels, intensity numbers, snake_case, "window", "null"),
   and no tacked-on "anything else?" (answer what was asked, then stop).
-- Never offer what no tool can do ("want me to look it up?", "I can search online"): answer instead.
+- Never offer what no tool can do ("want me to look it up?", "I can search online"): answer instead. Never offer
+  advice instead of giving it ("Want one quick bedtime tweak?"): give the step itself.
 - An offer to add, log, save or mark something ("Want me to add it to today's food?") is allowed only when a
   tool that can do it is offered this turn.
 - When a knowledge search ran (search_gssi), the reply never copies a passage: 12 or more words in a row the
@@ -31,6 +32,29 @@ GUILT = re.compile(r"(?:^|[.!?;:—]\s*|,\s+|\b(?:and|but|so)\s+)(?:you|you've|y
                    r"(?:\w+\s+)?(?:missed|failed|fallen\s+behind|falling\s+behind|behind|slack\w*)\b"
                    r"|\byou\s+should(?:n'?t)?\s+have\b|\blazy\b|\bslacking\b", re.I)
 
+# An offer of advice instead of the advice ("Want one quick bedtime tweak?", "want tips?", "Want a plan for tonight?"):
+# the reply gives the one step itself (asked for directly, 2026-11-19; outside the 2026-11-14 guard policy).
+ADVICE_OFFER = re.compile(r"\b(want|would\s+you\s+like|need|interested\s+in)\s+(me\s+to\s+(give|share|send|suggest)\s+"
+                          r"(you\s+)?)?(one|a|some|any|a\s+few|my)?\s*(\d[-‑\s]?point\s+|quick\s+|simple\s+|short\s+|"
+                          r"practical\s+|easy\s+)*(bedtime\s+|sleep\s+|recovery\s+|hrv\s+)?(tips?|tweaks?|checklist|"
+                          r"routine|plan\s+for\s+tonight|tricks?|pointers?)\b", re.I)
+
+# Illness, pain or injury they say they have (core/agent adds the medical line; get_today keeps the day easy).
+# Whole words only ("ill" is
+# never "will" or "still"), and training soreness ("sore legs", "4 2 sore") is not pain: only a sore throat is.
+ILLNESS = re.compile(r"\b((a|my|the|this|head|chest) cold|flu|fever\w*|sick|ill|illness|injur(y|ies|ed)|pain(ful|s)?|"
+                     r"hurts?|hurting|sore throat|sprain(ed)?|strain(ed)?|swollen|swelling|cough(ing)?|covid|nause\w*|"
+                     r"migraine|headache)\b", re.I)
+NEGATED = re.compile(r"\b(no|not|without|zero|any)\s+(\w+\s+)?$", re.I)     # "no injuries", "not in pain"
+
+
+def mentions_illness(text: str) -> bool:
+    """Their message names an illness, pain or injury that they have (not "no injuries")."""
+    return any(not NEGATED.search(text[max(0, m.start() - 20):m.start()])
+               and not re.match(r"\s*[:=-]?\s*(none|no)\b", text[m.end():], re.I) for m in ILLNESS.finditer(text))
+
+
+
 BANNED = [
     (re.compile(r"\bbands?\b", re.I), "the word 'band'"),
     (re.compile(r"\b(PUSH|MAINTAIN|RECOVER)\b"), "a band label"),
@@ -39,6 +63,7 @@ BANNED = [
     (re.compile(r"\bnull\b", re.I), "the word 'null'"),
     (re.compile(r"\b[a-z]+_[a-z0-9_]+\b"), "a snake_case term"),
     (re.compile(r"\banything else\b", re.I), "an extra offer ('anything else')"),
+    (ADVICE_OFFER, "an offer to give advice instead of giving it (give the one step itself, as a statement)"),
     (re.compile(r"\boverrides?\b", re.I), "the word 'override'"),
     (GUILT, "blame aimed at them (you missed, you failed, you should have, you're behind)"),
     (re.compile(r"\b(one|a|my)\s+(short\s+|quick\s+)?(line|sentence|note)\s+from\s+me\b|\bmy\s+own\s+line\b", re.I),

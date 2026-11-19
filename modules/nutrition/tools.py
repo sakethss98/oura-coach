@@ -21,11 +21,42 @@ from core.day import bounds_of_days, day_bounds
 from core.labels import clock
 from core.timeparse import parse_clock_time, resolve_dates, resolve_past_day
 from core.tools import GroupBy, Messages, as_json, ids_shown, range_for, range_label, turn, with_range_args
-from modules.nutrition import fueling, history, meals
+from modules.nutrition import caffeine, fueling, fueling_foods, history, meals
 from modules.nutrition.food import edit_food as change_food, log_food as save_food, lookup_and_sum
 from modules.nutrition.messages import confirm_entry, food_answer, items_of, source_line
 from modules.nutrition.targets import dish_key
 from modules.training.baseline import food_totals
+from core.labels import workout_phrase
+from core.score import usual_bedtime_of
+import today as today_view
+
+
+def _bedtime(t):
+    """Their usual bedtime (a datetime), or None (too few nights, or no device data)."""
+    try:
+        return usual_bedtime_of(t.user, Health(t.use_fixtures).bundle(t.user, t.day, now=t.now, allow_stale=True))
+    except Exception:
+        return None
+
+
+def _caffeine_so_far(t) -> float:
+    return food_totals(today_view.food_on(t.user, t.day))["caffeine_mg"] or 0
+
+
+def _next_run(t) -> dict | None:
+    """Today's next planned workout that isn't done and hasn't started: {"label", "start"}."""
+    upcoming = []
+    for plan in db.plans_between(t.user.id, t.day, t.day):
+        p = plan.get("plan_json") or {}
+        slot = p.get("time_slot") or "none"
+        if plan.get("completed") == 1 or slot == "none" or p.get("workout_type") == "rest":
+            continue
+        hour, minute = (int(x) for x in slot.split("-")[0].split(":"))
+        start = t.now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if start > t.now:
+            upcoming.append({"label": workout_phrase(p["workout_type"]).removeprefix("a ").removeprefix("an "),
+                             "start": start})
+    return min(upcoming, key=lambda r: r["start"]) if upcoming else None
 
 CORRECTION = re.compile(
     r"\bcorrection\b|\b(edit|fix|change|update|correct)\s+(that|it|this|the)\b"
@@ -110,10 +141,19 @@ def food_facts(text: str, config: RunnableConfig) -> tuple[str, dict]:
     t = turn(config)
     found = lookup_and_sum(t.user, text, t.day)
     from modules.nutrition.usda import total
-    answer = food_answer(text[:1].upper() + text[1:], found["items"], total(found["items"]))
+    sums = total(found["items"])
+    answer = food_answer(text[:1].upper() + text[1:], found["items"], sums)
     line = source_line(found["items"])
-    return (as_json({"sent_as_is": True, "from_usda": any(i.get("source") for i in found["items"])}),
-            {"verbatim": answer, **({"source_line": line} if line else {})})
+    # "Should I have it now?": decided in code where a rule of ours applies (caffeine and their bedtime, today's run).
+    rules = fueling.rules()
+    verdict = caffeine.call(sums.get("caffeine_mg") or 0, sums.get("calories") or 0, _caffeine_so_far(t), t.now,
+                            _bedtime(t), _next_run(t), rules["caffeine_sleep"], rules["caffeine"]["minutes_before"],
+                            t.user.goals()["recent_food_caps"])
+    facts = {"sent_as_is": True, "from_usda": any(i.get("source") for i in found["items"])}
+    if verdict:
+        facts |= {"call": verdict["call"], "call_reason": verdict["reason"]}
+    return (as_json(facts), {"verbatim": answer, **({"source_line": line} if line else {}),
+                             **({"call": verdict} if verdict else {})})
 
 
 @tool
@@ -205,13 +245,16 @@ def food_range(config: RunnableConfig, nutrients: list[Nutrient] | None = None, 
 
 
 @tool(response_format="content_and_artifact")
-def suggest_meal(meal: str | None, ingredients: list[str] | None, constraints: str | None,
-                 config: RunnableConfig) -> tuple[str, dict]:
-    """Meal ideas ("dinner ideas", "what should I eat now?"): 1-2 dishes with portions, sized for one meal,
-    different from recent ideas. meal: "breakfast", "lunch", "dinner", "snack", or null. ingredients: what
-    they said they have, or null. constraints: what they asked for ("quick", "high protein"), or null."""
+def suggest_meal(meal: str | None, ingredients: list[str] | None, constraints: str | None, state: Messages,
+                 config: RunnableConfig, instead_of: str | None = None) -> tuple[str, dict]:
+    """Meal ideas, one line each ("dinner ideas", "what can I make?", "make it higher protein"): 2-3 dishes with
+    rough protein, sized for one meal, different from recent ideas; the recipe comes after they pick one.
+    meal: "breakfast", "lunch", "dinner", "snack", or null. ingredients: what they said they have, or null.
+    constraints: what they asked for ("quick", "high protein"), or null. instead_of: the dish they want changed
+    ("make it higher protein" after a recipe or an idea), its name exactly as shown, else null."""
     t = turn(config)
-    ideas = meals.suggest(t.user, t.day, t.now, t.use_fixtures, meal, ingredients, constraints)
+    improve = {"dish": instead_of, "protein_g": meals.last_protein(state, instead_of)} if instead_of else None
+    ideas = meals.suggest(t.user, t.day, t.now, t.use_fixtures, meal, ingredients, constraints, improve)
     dishes = [o["dish"] for o in ideas["options"]]
     return (as_json({"sent_as_is": True, "options_in_order": dishes}),
             {"verbatim": ideas["text"], "protein_by_dish": {o["dish"]: o.get("est_protein_g") for o in ideas["options"]}})
@@ -286,6 +329,32 @@ def _carbs_lately(t) -> dict | None:
     return fueling.recent_carbs({d.isoformat(): food_totals(e)["carbs_g"] if e else None for d, e in entries.items()})
 
 
+def _caffeine_day(t, run_day, parts: list[str] | None) -> dict | None:
+    """Their caffeine so far, their usual bedtime and the hours to it when they'd take it (60 min before today's next
+    planned run, else now), for "about 110 mg for you today"."""
+    if not parts or "caffeine" not in parts:
+        return None
+    bedtime = _bedtime(t)
+    if run_day is not None and run_day != t.day:
+        return {"today": False, "so_far_mg": 0, "hours_to_bed": None, "bedtime": bedtime}
+    run = _next_run(t)
+    take_at = run["start"] - timedelta(minutes=fueling.rules()["caffeine"]["minutes_before"]) if run else t.now
+    return {"today": True, "so_far_mg": _caffeine_so_far(t), "hours_to_bed": caffeine.hours_until(bedtime, max(take_at, t.now)),
+            "bedtime": bedtime}
+
+
+EGGS = re.compile(r"\beggs?\b", re.I)
+
+
+def _foods(t) -> dict:
+    """Real foods for the fueling lines: their most-logged ones, else their diet's fallbacks."""
+    rules = fueling.rules()["foods"]
+    entries = db.food_between(t.user.id, t.now - timedelta(days=rules["pick"]["look_back_days"]), t.now)
+    eats_eggs = any(EGGS.search(f) and not re.search(r"\bno eggs?\b", f, re.I) for f in memory.for_prompt(t.user, t.day))
+    diet = t.user.goals()["nutrition"]["diet"]
+    return fueling_foods.pick(entries, rules, diet if diet in rules else "vegetarian", eats_eggs)
+
+
 def _they_said(number: float, messages: list) -> bool:
     """The number appears in one of their messages (so "as you said" is true)."""
     said = " ".join(str(m.content) for m in messages if isinstance(m, HumanMessage))
@@ -328,7 +397,7 @@ def _fueling(t, state: list, day_text: str | None = None, minutes: int | None = 
                 {"verbatim": fueling.ASK_TIME.format(km=distance_km)})
     result = fueling.plan(run_min, how, weight, parts, run_day, t.day, _carbs_lately(t), race,
                           ask_weight=weight is None and db.ask_once(t.user.id, "body_weight"), distance_km=distance_km,
-                          weight_from=weight_from)
+                          weight_from=weight_from, caffeine_day=_caffeine_day(t, run_day, parts), foods=_foods(t))
     # Facts only: instructions in a tool result get echoed back as the reply (the skill body says what to do).
     return (as_json({"sent_as_is": True, "run_day": f"{run_day:%a %b %d}" if run_day else None, "minutes": run_min,
                      "weight_known": weight is not None, "carb_load": result["carb_load"],

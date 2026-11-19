@@ -2,7 +2,7 @@
 
 Pure functions only (no I/O), so they are easy to unit test.
 """
-from core.labels import PLAIN_METRIC
+from core.labels import PLAIN_METRIC, clock, workout_phrase
 
 # How far from the 7-day average counts as "above"/"below".
 # ("points", n) = absolute difference, ("percent", n) = relative difference.
@@ -87,6 +87,31 @@ def readiness_band(comparison: dict, readiness_floor: int) -> dict:
 
 
 BAND_ORDER = ["recover", "maintain", "push"]   # lowest to highest
+
+# "How hard can I go today?": one recommendation, decided in code from the effective band (the same steer as the plan
+# prompt: HIIT on weekdays, a long run on weekends on a push day). An alternative is worth offering only on a borderline
+# day: readiness less than the readiness status threshold (5 points) from their floor.
+BAND_EFFORT = {"push": "hard", "maintain": "moderate", "recover": "easy"}
+EASY_TYPES = {"walk", "mobility", "rest"}
+
+
+def today_call(band: str, readiness: int | None, floor: int, weekday: int, window: list[str] | None,
+               program: list[dict] | None, minutes: dict) -> dict:
+    """{"effort", "workout" (plain words), "when", "borderline", "from_program"}. program: today's goal-program
+    sessions ([{workout_type, duration_min}]) — they are the recommendation; the band's steer is only the fallback.
+    On a recovery day a hard program session gives way to a walk (the program moves it). minutes: default lengths."""
+    def phrase(workout_type, mins=None):
+        return workout_phrase(workout_type, mins or minutes.get(workout_type, 30))
+
+    if program and not (band == "recover" and any(b["workout_type"] not in EASY_TYPES for b in program)):
+        workout, from_program = " then ".join(phrase(b["workout_type"], b.get("duration_min")) for b in program), True
+    else:
+        steer = {"push": "long_run" if weekday >= 5 else "HIIT", "maintain": "easy_run", "recover": "walk"}[band]
+        workout, from_program = phrase(steer), False
+    points = THRESHOLDS["readiness_score"][1]
+    return {"effort": BAND_EFFORT[band], "workout": workout, "from_program": from_program,
+            "when": f"now until {clock(window[1])}" if window else "no free time left today",
+            "borderline": readiness is not None and abs(readiness - floor) < points}
 
 
 def effective_band(oura_band: dict, checkin: dict | None, rules: dict) -> dict:

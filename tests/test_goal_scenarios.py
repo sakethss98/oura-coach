@@ -8,7 +8,7 @@ import pytest
 
 from connectors.health import Health, neutral_day
 from core import db
-from core.agent import MEDICAL
+from core.agent import MEDICAL, NOT_MEASURED
 from core.reply_rules import GUILT
 from modules.goals import direction, service
 from tests.conftest import call, judge, live, needs_fixtures, parsed_checkin, say
@@ -176,7 +176,8 @@ def test_e_10_direction_check_is_code_milestones_and_says_what_isnt_measured(coa
                   "I can't measure lifts or muscle.")
     reply = Chat(coach, user, chat_model).send("am I becoming a hybrid athlete by December?", 9, 0, [
         call("direction_check"), say(model_line)])
-    assert reply == model_line
+    # Code says what isn't measured, in one fixed line, and drops the model's own sentence saying it (H-2).
+    assert reply == model_line.replace(" I can't measure lifts or muscle.", "") + f"\n\n{NOT_MEASURED}"
     result = next(m for m in chat_model.seen[-1] if getattr(m, "name", None) == "direction_check")
     assert '"actual": 0.2' in result.content and "not_measured" in result.content     # one short lift in 4 weeks
 
@@ -206,7 +207,8 @@ def test_e_14_a_knee_limit_is_saved_on_yes_and_the_next_plan_has_no_run(coach, u
     assert first == f"{OFFER}\n\n{MEDICAL}" and not db.active_limits(user.id)
     saved = chat.send("yes", 9, 2, [call("save_limit", body_area="knee", kind="pain", avoid=["running_impact"],
                                          intensity_cap=None, start_text=None, end_text=None), say("")])
-    assert saved == "Saved: no running impact for your knee until you tell me it's better."   # no guidance: no line
+    assert saved == ("Saved: no running impact for your knee until you tell me it's better.\n\n"
+                     f"{MEDICAL}")                   # every pain or injury reply, a saved limit too (H-1)
     fake_llm.plan = fake_llm.plan.model_copy(update={"workout_type": "easy_run", "intensity": 3})
     chat.send("want to work out now", 9, 4, [call("start_checkin", request_text=None), say("")])
     chat.send("4 1", 9, 6, [call("submit_checkin", answer="4 1"), say("")])

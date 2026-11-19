@@ -23,13 +23,14 @@ from modules.nutrition.targets import daily_targets, dish_key, fallback_meal, me
 from modules.training.baseline import food_totals
 import today   # the shared day view: food_on, recent_meal_ideas
 
-MAX_OPTIONS = 2
+MAX_OPTIONS = 3
 OFTEN_LOGGED_DAYS = 30
 OFTEN_LOGGED_COUNT = 10
 ATE_RECENTLY_DAYS = 2      # what they ate today or yesterday isn't suggested again either
 MORE_PROTEIN = re.compile(r"\b(higher|more|high|extra|increase|boost|add)\b.*\bprotein\b|\bprotein\b.*\b(up|higher|more)\b",
                           re.I)
 NOT_HIGHER = "This version isn't higher in protein than the last one (about {new:.0f} g vs {old:.0f} g)."
+NONE_HIGHER = "None of these is higher in protein than the {dish} (about {old:.0f} g)."
 
 
 def often_logged(user, now: datetime) -> list[str]:
@@ -60,12 +61,28 @@ def _fresh(options: list[dict], avoid: list[str]) -> list[dict]:
     return kept
 
 
+def _improved(options: list[dict], improve: dict | None) -> list[dict]:
+    """For "make it higher protein": only options with more protein than the dish they saw, the same dish improved
+    first (then the different ideas)."""
+    if not improve:
+        return options
+    if improve.get("protein_g") is not None:
+        options = [o for o in options if (o.get("est_protein_g") or 0) > improve["protein_g"]]
+    key = dish_key(improve["dish"])
+    return sorted(options, key=lambda o: dish_key(o["dish"]) != key)
+
+
 def suggest(user, day: date, now: datetime, use_fixtures: bool, meal: str | None = None,
-            ingredients: list[str] | None = None, constraints: str | None = None) -> dict:
-    """1-2 meal ideas sized for one meal: {"options": [...], "size": {...}, "text": message}."""
+            ingredients: list[str] | None = None, constraints: str | None = None,
+            improve: dict | None = None) -> dict:
+    """2-3 one-line meal ideas sized for one meal: {"options": [...], "size": {...}, "text": message}.
+    improve: {"dish", "protein_g"} for "make it higher protein": option 1 is that dish made higher in protein, then
+    1-2 different ideas, each above its protein (the dish itself isn't a repeat here)."""
     size = _meal_size(user, day, now, use_fixtures)
     ate = [e["raw_text"] for e in db.food_between(user.id, now - timedelta(days=ATE_RECENTLY_DAYS), now)]
     avoid = today.recent_meal_ideas(user, day) + ate
+    if improve:
+        avoid = [a for a in avoid if dish_key(a) != dish_key(improve["dish"])]
     context = {
         "meal": meal or "their next meal",
         "now": f"{now:%H:%M}",
@@ -76,20 +93,26 @@ def suggest(user, day: date, now: datetime, use_fixtures: bool, meal: str | None
         "foods_they_often_log": often_logged(user, now),
         "do_not_suggest": avoid,
     }
-    options = []
+    if improve:
+        context["improve"] = {"dish": improve["dish"], "protein_g_now": improve.get("protein_g")}
+    options, fresh, note = [], [], None
     for _ in range(2):                                     # the second try names what was rejected
         ideas = structured_call("meal", MealIdeas, load_prompt("meal"), json.dumps(context, indent=2), user.id)
         proposed = [o.model_dump() for o in ideas.options]
-        options = _fresh(proposed, avoid)
-        if options:
+        fresh = _fresh(proposed, avoid)
+        options = _improved(fresh, improve)
+        same_first = not improve or (options and dish_key(options[0]["dish"]) == dish_key(improve["dish"]))
+        if options and same_first:
             break
-        context["rejected_as_repeats"] = [o["dish"] for o in proposed]
+        context["rejected_as_repeats" if not improve else "rejected"] = [o["dish"] for o in proposed]
+    if not options and fresh and improve and improve.get("protein_g") is not None:
+        options, note = fresh, NONE_HIGHER.format(dish=improve["dish"], old=improve["protein_g"])   # said plainly
     if not options:
         dish = fallback_meal(size and {"protein_g": size["protein_g"]}, user.goals()["nutrition"]["diet"], day, avoid)
-        options = [{"dish": dish, "portions": [], "est_calories": None, "est_protein_g": None}]
+        options = [{"dish": dish, "est_calories": None, "est_protein_g": None}]
     options = options[:MAX_OPTIONS]
     db.add_meal_suggestions(user.id, day, [o["dish"] for o in options])
-    return {"options": options, "size": size, "text": format_meal_ideas(options, size, meal)}
+    return {"options": options, "size": size, "text": format_meal_ideas(options, size, meal, note)}
 
 
 def last_protein(messages: list, dish: str) -> float | None:

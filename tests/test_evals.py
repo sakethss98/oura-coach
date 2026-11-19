@@ -117,11 +117,11 @@ def test_eval_set_cases_are_well_formed():
         assert c["turns"] and all(t["text"] for t in c["turns"]), c["id"]
         assert all(s in known_setups or s.startswith("readiness_") for s in c.get("setup", [])), c["id"]
     assert {c["id"] for c in public} >= {"G-1", "G-2/G-4", "G-3", "G-5", "G-6", "G-7", "G-8"}
-    if PERSONAL_SET.exists():                 # with the person's own questions: 5-10 per category
+    if PERSONAL_SET.exists():                 # with the person's own questions: 5-12 per category (H cases, 2026-11-19)
         per = {}
         for c in every:
             per[c["categories"][0]] = per.get(c["categories"][0], 0) + 1
-        assert all(5 <= n <= 10 for n in per.values()) and set(per) == set(ALL_SKILLS), per
+        assert all(5 <= n <= 12 for n in per.values()) and set(per) == set(ALL_SKILLS), per
 
 
 def test_the_public_set_holds_none_of_their_own_messages():
@@ -176,3 +176,37 @@ def test_source_lines_beside_a_plan_and_with_two_markers():
     two = "A [1]. B [2].\nSource [1]: GSSI – A https://x.org/a\nSource [2]: GSSI – B https://x.org/b"
     assert checks.source_lines(turn(two))[0] == "yes"
     assert checks.source_lines(turn("A [1]. B [2].\nSource [1]: GSSI – A https://x.org/a"))[0] == "no"
+
+
+# --- the H-1..H-8 code checks ------------------------------------------------------------------------------------
+
+def _turn(message, reply, tool_results=(), categories=("nutrition",)):
+    from evals.checks import Turn
+    return Turn(case={}, message=message, earlier=[], reply=reply, tool_results=list(tool_results),
+                categories=list(categories))
+
+
+def test_the_h_code_checks():
+    from core.agent import MEDICAL, NOT_MEASURED
+    from evals import checks
+    assert checks.medical_line(_turn("3 1 sore throat", f"Plan…\n\n{MEDICAL}", categories=["training"]))[0] == "yes"
+    assert checks.medical_line(_turn("4 2 sore legs", "Plan…", categories=["training"]))[0] == "n/a"
+    assert checks.not_measured_line(_turn("am I building muscle?", f"Mostly runs.\n\n{NOT_MEASURED}"))[0] == "yes"
+    assert checks.not_measured_line(_turn("am I building muscle?", "Mostly runs."))[0] == "no"
+    facts = {"name": "food_facts", "content": "{}", "artifact": {"verbatim": "A Celsius: 200 mg caffeine.",
+                                                                 "call": {"call": "no", "reason": "late"}}}
+    assert checks.clear_call(_turn("should I have a Celsius now?", "Not now: it's late.\n\nA Celsius…", [facts]))[0] == "yes"
+    assert checks.clear_call(_turn("should I have a Celsius now?", "Yes, enjoy.\n\nA Celsius…", [facts]))[0] == "no"
+    assert checks.clear_call(_turn("how much caffeine is in a Celsius?", "A Celsius…", [facts]))[0] == "n/a"
+    plan = "Caffeine, if you use it: about 110 mg for you today, about 60 min before the run."
+    fuel = {"name": "fueling_plan", "content": "{}", "artifact": {"verbatim": plan}}
+    assert checks.caffeine_for_you(_turn("coffee before a run?", plan, [fuel]))[0] == "yes"
+    long = "🏃 Run Sat Oct 10 · about 37 min\nFri dinner: your usual dal + rice (no extra carbs needed).\nAfter: …"
+    assert checks.fueling_foods(_turn("long run Saturday?", long, [{"name": "fueling_plan", "content": "{}",
+                                                                    "artifact": {"verbatim": long}}]))[0] == "yes"
+    ideas = "For dinner:\n1. Paneer bhurji · ~30 g protein\n2. Dal palak · ~25 g protein\nPick one for the recipe."
+    meal = {"name": "suggest_meal", "content": "{}", "artifact": {"verbatim": ideas}}
+    assert checks.brainstorm_options(_turn("dinner ideas", ideas, [meal]))[0] == "yes"
+    recipe_like = ideas.replace("Pick one for the recipe.", "   paneer 150 g (1 katori)")
+    meal["artifact"]["verbatim"] = recipe_like
+    assert checks.brainstorm_options(_turn("dinner ideas", recipe_like, [meal]))[0] == "no"

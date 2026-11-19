@@ -116,4 +116,4 @@ def test_f_1_a_should_i_question_keeps_the_coachs_answer_next_to_the_numbers(coa
     line = "Yes, it's a good protein snack before your run."
     reply = Chat(coach, user, chat_model).send("should I have a Chobani plain Greek yogurt now?", 9, 0, [
         call("food_facts", text=CHOBANI), say(line)])
-    assert reply.startswith("A Chobani plain Greek yogurt (150 g): about 14 g protein") and line in reply
+    assert reply.startswith(line + "\n\nA Chobani plain Greek yogurt (150 g): about 14 g protein")  # answer first (H-3)

@@ -25,7 +25,7 @@ from core import agent, citations, classifier, db, reply_rules, users  # noqa: E
 from core.config import DB_PATH, FIXTURES_DIR  # noqa: E402
 from modules.nutrition import food  # noqa: E402
 from modules.nutrition import meals  # noqa: E402
-from modules.nutrition.schemas import (FoodItem, FoodItems, ItemGuess, MealIdeas, MealOption, Portion,  # noqa: E402
+from modules.nutrition.schemas import (FoodItem, FoodItems, ItemGuess, MealIdea, MealIdeas, Portion,  # noqa: E402
                                        Recipe)
 from modules.training import planner as graph  # noqa: E402
 from modules.training import checkin  # noqa: E402
@@ -247,11 +247,9 @@ def parsed_checkin(energy=None, soreness=None, blocks=(), feeling=None, constrai
                         constraints=list(constraints))
 
 
-def ideas(*dishes: str) -> MealIdeas:
-    """Meal ideas as the LLM would give them: one option per dish, with portions."""
-    return MealIdeas(options=[MealOption(dish=d, portions=[Portion(food="cooked dal", grams=200, household="1 katori"),
-                                                           Portion(food="chapati", grams=80, household="2 chapatis")],
-                                         est_calories=550, est_protein_g=25) for d in dishes])
+def ideas(*dishes: str, protein: float = 25) -> MealIdeas:
+    """Meal ideas as the LLM would give them: one line per dish, with rough numbers."""
+    return MealIdeas(options=[MealIdea(dish=d, est_calories=550, est_protein_g=protein) for d in dishes])
 
 
 class FakeLLM:

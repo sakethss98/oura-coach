@@ -57,6 +57,13 @@ def usual_bedtime(previous: list[datetime]) -> datetime | None:
     return previous[-1].replace(hour=(18 + mean // 60) % 24, minute=mean % 60)
 
 
+def usual_bedtime_of(user, bundle: dict) -> datetime | None:
+    """Their usual bedtime from the nights before (a Health bundle's history), once there are enough nights."""
+    previous = [datetime.fromisoformat(h["bedtime_start"]).astimezone(user.tz) for h in bundle["history"]
+                if h.get("bedtime_start")]
+    return usual_bedtime(previous) if len(previous) >= load_config()["recovery"]["bedtime_min_nights"] else None
+
+
 def _linear(off: float, full_within: float, zero_at: float) -> float:
     if off <= full_within:
         return 1.0

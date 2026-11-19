@@ -290,23 +290,41 @@ def test_4b_two_pizzas_and_the_model_guesses_nothing_is_removed(coach, user, cha
     assert food_today(user) == []
 
 
-def test_5_ideas_then_the_second_one_then_higher_protein_is_the_same_dish(coach, user, chat_model, fake_llm):
-    fake_llm.recipe_queue = [fake_llm.recipe, fake_llm.recipe.model_copy(update={"est_protein_g": 33})]
+def test_5_ideas_then_the_second_one_then_higher_protein_options_then_the_pick(coach, user, chat_model, fake_llm):
     chat = Chat(coach, user, chat_model)
     ideas_reply = chat.send("simple dinner ideas, I have dal, rice and spinach", 19, 0, [
         call("suggest_meal", meal="dinner", ingredients=["dal", "rice", "spinach"], constraints="simple"), say("")])
-    lines = ideas_reply.splitlines()
-    assert lines[0].startswith("For dinner, about ") and lines[1].startswith("1. Dal palak with jeera rice")
-    assert lines[3].startswith("2. Spinach moong dal khichdi") and "g (" in lines[4]   # grams + household measure
+    lines = ideas_reply.splitlines()                  # a brainstorm: one line each, rough protein, then the pick (H-8)
+    assert lines == [lines[0], "1. Dal palak with jeera rice · ~25 g protein",
+                     "2. Spinach moong dal khichdi · ~25 g protein", "Pick one for the recipe."]
+    assert lines[0].startswith("For dinner, about ")
     dish = last_tool_result(chat_model, "suggest_meal")["options_in_order"][1]
     recipe = chat.send("give me the second one", 19, 1, [call("meal_recipe", dish=dish, change=None,
                                                               ingredients=["dal", "rice", "spinach"]), say("")])
-    assert recipe.startswith("Spinach moong dal khichdi · about")
-    revised = chat.send("make it higher protein", 19, 2, [call("meal_recipe", dish=dish, change="higher protein",
-                                                               ingredients=None), say("")])
-    assert revised.startswith("Spinach moong dal khichdi (higher protein) · about 520 kcal, 33 g protein")
-    assert '"previous_version_protein_g": 24' in fake_llm.calls[-1][1]           # the version they saw
+    assert recipe.startswith("Spinach moong dal khichdi · about 520 kcal, 24 g protein")
+    fake_llm.meal_queue = [ideas("Spinach moong dal khichdi + 100 g paneer", protein=38)]
+    fake_llm.meal_queue[0].options += ideas("Paneer tikka with roti", protein=35).options + \
+        ideas("Soya pulao", protein=20).options                      # not above the 24 g they saw: dropped
+    revised = chat.send("make it higher protein", 19, 2, [
+        call("suggest_meal", meal="dinner", ingredients=None, constraints="higher protein", instead_of=dish), say("")])
+    assert revised.splitlines()[1:] == ["1. Spinach moong dal khichdi + 100 g paneer · ~38 g protein",
+                                        "2. Paneer tikka with roti · ~35 g protein", "Pick one for the recipe."]
+    assert '"protein_g_now": 24' in fake_llm.calls[-1][1]                         # the version they saw
+    picked = chat.send("the first one", 19, 3, [call("meal_recipe", dish="Spinach moong dal khichdi + 100 g paneer",
+                                                     change=None, ingredients=None), say("")])
+    assert picked.startswith("Spinach moong dal khichdi + 100 g paneer · about")  # the full recipe only now
     assert plans_today(user) == [] and db.pending_plan(1) is None                  # must not: a workout plan
+
+
+def test_5_higher_protein_with_nothing_higher_says_so(coach, user, chat_model, fake_llm):
+    chat = Chat(coach, user, chat_model)
+    chat.send("simple dinner ideas, I have dal, rice and spinach", 19, 0, [
+        call("suggest_meal", meal="dinner", ingredients=["dal", "rice", "spinach"], constraints="simple"), say("")])
+    fake_llm.meal_queue = [ideas("Spinach moong dal khichdi with curd", "Rajma chawal", protein=20)] * 2
+    revised = chat.send("make it higher protein", 19, 2, [
+        call("suggest_meal", meal="dinner", ingredients=None, constraints="higher protein",
+             instead_of="Spinach moong dal khichdi"), say("")])
+    assert "None of these is higher in protein than the Spinach moong dal khichdi (about 25 g)." in revised
 
 
 def test_5b_dinner_ideas_on_two_days_in_a_row_are_different_dishes(coach, user, chat_model, fake_llm):
@@ -1022,10 +1040,17 @@ def test_live_5_ideas_recipe_and_higher_protein(coach, user, real_meals):
     first = chat.send("simple dinner ideas, I have dal, rice and spinach", 19, 0)
     recipe = chat.send("give me the second one", 19, 1)
     revised = chat.send("make it higher protein", 19, 2)
-    chat.print("scenario 5: ideas, the second one, higher protein")
-    options = [line.split(". ", 1)[1].split(" · ")[0] for line in first.splitlines() if line[:2] in ("1.", "2.")]
-    assert first.startswith("For dinner") and len(options) == 2 and " g (" in first
-    assert recipe.startswith(options[1]) and revised.startswith(f"{options[1]} (")
+    picked = chat.send("the first one", 19, 3)
+    chat.print("scenario 5: ideas, the second one, higher protein, the first one")
+
+    def options(text):
+        return [line.split(". ", 1)[1].split(" · ")[0] for line in text.splitlines() if line[:2] in ("1.", "2.", "3.")]
+    assert first.startswith("For dinner") and 2 <= len(options(first)) <= 3 and "g protein" in first
+    assert first.endswith("Pick one for the recipe.") and " g (" not in first          # no portions before a pick
+    assert recipe.startswith(options(first)[1]) and " g (" in recipe
+    better = options(revised)                         # option 1: the same dish, made higher in protein (H-8)
+    assert 2 <= len(better) <= 3 and dish_key(better[0]) == dish_key(options(first)[1])
+    assert picked.startswith(better[0]) and " g (" in picked
     assert plans_today(user) == []
 
 
@@ -1630,7 +1655,7 @@ def test_live_m4_3_a_yes_the_next_morning(coach, user):
 
 
 @live
-def test_live_m4_4_caffeine_in_a_celsius(coach, user):
+def test_live_m4_4_caffeine_in_a_celsius(coach, user, real_food):      # food_facts reads the drink for real
     chat = Chat(coach, user)
     reply = chat.send("How much caffeine is in a 12 oz Celsius?", 10, 0)
     chat.print("scenario M4-4: caffeine in a Celsius")
@@ -1731,7 +1756,9 @@ def test_m4_11_long_run_fueling_is_the_codes_amounts_with_a_line_and_a_link(coac
     own, amounts = own.split("\n")             # next to the plan: no [n] marker, so no Source line (G-4)
     assert plan.splitlines()[:2] == [
         "🏃 Run Sat Oct 10 · about 37 min (your longest run in the last 4 weeks; tell me if it's longer)",
-        "Fri: no extra carbs needed, just your usual meals with carbs; lately about 180 g a day (3 days logged)."]
+        "Fri dinner: your usual rice and dal (no extra carbs needed for a run under 90 min); lately about 180 g a "
+        "day (3 days logged)."]                   # their own logged meal (H-7)
+    assert "Sat, 60–90 min before: a banana or toast, if you want something." in plan
     assert own == line.replace(" [1]", "") and "Source [" not in reply
     assert amounts.startswith("Amounts: GSSI – ") and amounts.count(" · ") == 3      # one line, all 4 articles
     assert fake_gssi == [("gssi", "search_gssi", {"query": "carbohydrate the day before a long run", "k": 4})]
@@ -1776,8 +1803,8 @@ def test_m4_12_coffee_before_a_run_is_timed_and_sized_for_their_weight(coach, us
     reply = Chat(coach, user, chat_model).send(COFFEE_QUESTION, 7, 0, [
         call("search_gssi", query="caffeine timing before exercise", k=3), call("fueling_plan", parts=["caffeine"]),
         say(f"A modest dose about an hour before helps many people. {GSSI_URLS['caffeine']}")])        # pasted url
-    assert reply.startswith("Caffeine, if you use it: start low, 1.5–3 mg/kg → 100–210 mg; more doesn't help. Take "
-                            "it about 60 min before the run")                                    # 69.9 kg
+    assert reply.startswith("Caffeine, if you use it: about 110 mg for you today, about 60 min before the run (or "
+                            "late in a long one). Start low (1.5–3 mg/kg → 105–210 mg)")      # 69.9 kg, rounded up (H-6)
     assert reply.count("(using 70 kg from your Oura profile; tell me if that's off)") == 1    # said where, once
     assert "helps many people." in reply and "Source [" not in reply and "gssiweb.org/en/sports-science-exchange/" \
         "article/caffeine-and-exercise" not in reply.split("Amounts:")[0]          # the pasted url: gone, no marker
@@ -1789,7 +1816,7 @@ def test_m4_12_coffee_before_a_run_is_timed_and_sized_for_their_weight(coach, us
     assert "🏃" not in reply
     again = Chat(coach, user, chat_model).send(COFFEE_QUESTION, 7, 30, [call("fueling_plan", parts=["caffeine"]),
                                                                         say("")])
-    assert "100–210 mg" in again and "using 70 kg" not in again                     # once per weight, not each time
+    assert "105–210 mg" in again and "using 70 kg" not in again                     # once per weight, not each time
 
 
 EASY_6K = ("running", "06:00", "06:39", 6000)          # 6 km in 39 min: a usable 6:30 per km
@@ -1976,7 +2003,7 @@ def test_m4_14_more_carbs_next_to_a_no_extra_carbs_plan_is_trimmed(coach, user, 
     reply = Chat(coach, user, chat_model).send(LONG_RUN_QUESTION, 9, 0, [
         call("search_gssi", query="carbs before a long run", k=2), call("fueling_plan", day_text="Saturday"),
         say(drift), say(drift)])
-    assert "Fri: no extra carbs needed" in reply and "boost carbs" not in reply
+    assert "Fri dinner: dal with rice (no extra carbs needed" in reply and "boost carbs" not in reply
 
 
 @live
@@ -2134,7 +2161,7 @@ COVERAGE = {
     "4": ("test_4_remove_the_pizza_names_it_and_updates_totals", "test_live_4_remove_the_pizza"),
     "4b": ("test_remove_food_asks_when_several_entries_match", "test_live_4b_two_pizzas_asks_which"),
     "4c": ("test_4b_two_pizzas_and_the_model_guesses_nothing_is_removed", "test_live_4b_two_pizzas_asks_which"),
-    "5": ("test_5_ideas_then_the_second_one_then_higher_protein_is_the_same_dish",
+    "5": ("test_5_ideas_then_the_second_one_then_higher_protein_options_then_the_pick",
           "test_live_5_ideas_recipe_and_higher_protein"),
     "5b": ("test_5b_dinner_ideas_on_two_days_in_a_row_are_different_dishes",
            "test_live_5b_two_days_of_dinner_ideas_are_different"),
@@ -2217,6 +2244,18 @@ COVERAGE = {
     "F-1": ("test_f_1_a_branded_item_is_answered_and_logged_with_the_same_numbers", "test_live_f_1_branded_item"),
     "F-2": ("test_f_2_a_mixed_dish_is_looked_up_item_by_item_and_summed_by_code", "test_live_f_2_mixed_dish"),
     "F-3": ("test_f_3_the_server_down_gives_approximate_numbers_and_no_usda_line", "test_live_f_3_server_down"),
+    "H-1": ("test_h_1_illness_in_a_checkin_answer_gets_the_line_and_sore_legs_do_not",
+            "test_live_h_1_a_cold_ends_with_the_line_and_sore_legs_do_not"),
+    "H-2": ("test_h_2_a_muscle_question_gets_the_not_measured_line", "test_live_h_2_muscle_question_says_what_isnt_measured"),
+    "H-3": ("test_h_3_late_in_the_evening_is_no_and_a_wrong_yes_becomes_codes_sentence",
+            "test_live_h_3_should_i_have_a_celsius_opens_with_the_call"),
+    "H-4": ("test_h_4_an_offer_of_a_tweak_is_rewritten_into_the_step", "test_live_h_4_hrv_question_gives_the_step_itself"),
+    "H-5": ("test_h_5_how_hard_gets_codes_call_and_borderline_only_near_the_floor",
+            "test_live_h_5_how_hard_gives_one_recommendation"),
+    "H-6": ("test_h_6_caffeine_for_them_today_with_what_they_had_and_their_bedtime",
+            "test_live_h_6_caffeine_is_sized_for_them"),
+    "H-7": ("test_h_7_the_plan_names_their_own_foods_and_when", "test_live_h_7_long_run_plan_names_their_foods"),
+    "H-8": ("test_h_8_what_can_i_make_is_three_one_line_ideas", "test_live_h_8_what_can_i_make_is_a_brainstorm"),
 }
 
 
@@ -2226,12 +2265,13 @@ def _marks(test) -> set[str]:
 
 def test_every_scenario_in_the_doc_has_a_scripted_and_a_live_test():
     text = SCENARIOS_DOC.read_text()
-    ids = re.findall(r"^- \*\*([0-9]+[a-z]?|M4-\d+[a-z]?|[EF]-\d+[a-z]?)\b", text, re.M)
+    ids = re.findall(r"^- \*\*([0-9]+[a-z]?|M4-\d+[a-z]?|[EFH]-\d+[a-z]?)\b", text, re.M)
     assert sorted(ids) == sorted(COVERAGE), set(ids) ^ set(COVERAGE)
     code_only = set(re.findall(r"^- \*\*(E-\d+[a-z]?)\*\* \(code only\)", text, re.M))
-    from tests import test_food_scenarios, test_generator, test_goal_scenarios, test_program_validate
+    from tests import (test_finish_scenarios, test_food_scenarios, test_generator, test_goal_scenarios,
+                       test_program_validate)
     tests = {**vars(test_generator), **vars(test_program_validate), **vars(test_goal_scenarios),
-             **vars(test_food_scenarios), **globals()}
+             **vars(test_food_scenarios), **vars(test_finish_scenarios), **globals()}
     for scenario, (scripted, live_name) in COVERAGE.items():
         assert scripted in tests and "live_llm" not in _marks(tests[scripted]), scenario
         if scenario in code_only:                   # an engine test: no model involved, so no live run

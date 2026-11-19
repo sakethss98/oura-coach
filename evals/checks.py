@@ -159,17 +159,81 @@ def confirm_after_yes(t: Turn, **_):
 
 
 def medical_line(t: Turn, **_):
-    """core/agent.MEDICAL closes every pain, injury or illness answer that has words of the coach's own."""
-    from core.agent import MEDICAL
-    if not t.own_words():
-        return "n/a", "no guidance in its own words (only code-built text)"
+    """core/agent.MEDICAL closes every pain, injury or illness answer: routed to pain_injury, or their message names
+    an illness, pain or injury (H-1)."""
+    from core.agent import MEDICAL, MEDICAL_SKILL, mentions_illness
+    if MEDICAL_SKILL not in t.categories and not mentions_illness(t.message):
+        return "n/a", "not about pain, an injury or an illness"
     return ("yes", "the code's line is there") if MEDICAL in t.reply.splitlines() else ("no", "the line is missing")
+
+
+def not_measured_line(t: Turn, **_):
+    """A question about muscle, body composition or hybrid progress gets code's not-measured line, once (H-2)."""
+    from core.agent import MEASURE_ASK, NOT_MEASURED
+    if not MEASURE_ASK.search(t.message):
+        return "n/a", "not a question about muscle, body composition or hybrid progress"
+    if NOT_MEASURED not in t.reply:
+        return "no", "the code's not-measured line is missing"
+    return "yes", "the code's line is there"
+
+
+def clear_call(t: Turn, **_):
+    """"Should I have X now?": the reply opens with yes, no or wait, and with code's call when code made one (H-3)."""
+    from core.agent import OPENS, SHOULD_HAVE
+    if not SHOULD_HAVE.search(t.message):
+        return "n/a", "not a should-I-have-it question"
+    verdict = next((r["artifact"]["call"] for r in t.tool_results if r["name"] == "food_facts"
+                    and isinstance(r.get("artifact"), dict) and r["artifact"].get("call")), None)
+    first = t.reply.strip()
+    opened = [call for call, pattern in OPENS.items() if pattern.match(first)]
+    if not opened:
+        return "no", f"opens with {first[:40]!r}, not yes, no or wait"
+    if verdict and verdict["call"] not in opened:
+        return "no", f"opens with {opened[0]}, code's call was {verdict['call']}"
+    return "yes", f"opens with {opened[0]}" + (" (code's call)" if verdict else "")
+
+
+def caffeine_for_you(t: Turn, **_):
+    """A fueling plan with caffeine says the amount for them today (or why to skip it), not only the range (H-6)."""
+    texts = [r["artifact"]["verbatim"] for r in t.tool_results if r["name"] in PLAN_TOOLS_WITH_AMOUNTS
+             and isinstance(r.get("artifact"), dict) and "Caffeine" in (r["artifact"].get("verbatim") or "")]
+    if not texts:
+        return "n/a", "no caffeine in a fueling plan"
+    if re.search(r"about \d+ mg for you|skip it today|skip more today", texts[-1]) and texts[-1] in t.reply:
+        return "yes", "the amount for them, by code"
+    return "no", "the caffeine line has only the range"
+
+
+def fueling_foods(t: Turn, **_):
+    """A long-run or race plan names real foods with their timing (the dinner before, a snack before) (H-7)."""
+    texts = [r["artifact"]["verbatim"] for r in t.tool_results if r["name"] in PLAN_TOOLS_WITH_AMOUNTS
+             and isinstance(r.get("artifact"), dict) and "🏃" in (r["artifact"].get("verbatim") or "")]
+    if not texts or not re.search(r"^(\w{3}|The day before)( dinner)?:|before:", texts[-1], re.M):
+        return "n/a", "no plan for the day before or before the run"
+    named = re.search(r"dinner: \S|at dinner, \S|min before: \S|\(.+ works\)", texts[-1])
+    return ("yes", "real foods with their timing") if named else ("no", "no food named in the plan")
+
+
+def brainstorm_options(t: Turn, **_):
+    """Meal ideas are 2-3 one-line options with rough protein, then the pick; no recipe before a pick (H-8)."""
+    from modules.nutrition.messages import PICK_ONE
+    texts = [r["artifact"]["verbatim"] for r in t.tool_results if r["name"] == "suggest_meal"
+             and isinstance(r.get("artifact"), dict) and r["artifact"].get("verbatim")]
+    if not texts:
+        return "n/a", "no meal ideas this turn"
+    lines = texts[-1].splitlines()
+    options = [line for line in lines if re.match(r"^\d\. ", line)]
+    ok = 2 <= len(options) <= 3 and all("g protein" in line for line in options) and lines[-1] == PICK_ONE \
+        and not re.search(r" \d+ g \(", texts[-1])
+    return ("yes", f"{len(options)} one-line options, then the pick") if ok else ("no", f"{len(options)} options, "
+                                                                                     "or portions before a pick")
 
 
 CHECKS = {"numbers_from_tools": numbers_from_tools, "tools_called": tools_called, "expected_tools": expected_tools,
           "reply_rules": reply_rules_check, "source_lines": source_lines, "no_ids": no_ids,
           "fixed_decline": fixed_decline, "confirm_after_yes": confirm_after_yes,
-          "medical_line": medical_line}
+          "medical_line": medical_line, "not_measured_line": not_measured_line, "clear_call": clear_call,
+          "caffeine_for_you": caffeine_for_you, "fueling_foods": fueling_foods, "brainstorm_options": brainstorm_options}
 ARGS = ("all", "any", "none")
 
 
