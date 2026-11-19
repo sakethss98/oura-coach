@@ -113,11 +113,12 @@ def test_h_3_a_run_later_today_is_wait(coach, user, chat_model, fake_llm):
 
 def test_h_4_an_offer_of_a_tweak_is_rewritten_into_the_step(coach, user, chat_model):
     offer = "Your HRV is above your usual today. Want one quick bedtime tweak to keep it up tonight?"
-    step = "Your HRV is above your usual today. Lights out at your usual time tonight keeps it there."
+    step = "Your HRV is above your usual today. Lights out by 12:45am tonight keeps it there."
     reply = Chat(coach, user, chat_model).send(HRV_Q, 9, 0, [call("get_today", include_health=True), say(offer),
                                                             say(step)])
     assert reply == step
-    assert last_tool_result(chat_model, "get_today")["health"]["usual_bedtime"].endswith("am")   # a code clock time
+    health = last_tool_result(chat_model, "get_today")["health"]
+    assert health["usual_bedtime"] == "1:25am" and health["lights_out_tonight"] == "12:45am"   # earlier, by code
 
 
 def test_h_4_a_rewrite_that_still_offers_is_trimmed(coach, user, chat_model):
@@ -180,6 +181,14 @@ def test_h_7_the_plan_names_their_own_foods_and_when(coach, user, chat_model):
     assert "Sat, 60–90 min before: your usual banana, if you want something." in lines
     assert any(line.startswith("After: 20–25 g protein (your usual Greek yogurt works)") for line in lines)
     assert last_tool_result(chat_model, "fueling_plan")["carb_load"] is False
+
+
+def test_g_9_a_sodium_amount_the_plan_doesnt_give_is_dropped(coach, user, chat_model, fake_gssi):
+    line = "Readiness is solid and the week was light. Add 500 mg of sodium per liter to your bottle during the run."
+    reply = Chat(coach, user, chat_model).send(LONG_RUN_QUESTION, 9, 0, [
+        call("search_gssi", query="sodium during a run", k=3), call("fueling_plan", day_text="Saturday"), say(line)])
+    assert "water is fine" in reply and "500 mg" not in reply           # a different amount: a wrong fact, cut
+    assert "Readiness is solid and the week was light." in reply
 
 
 # --- H-8 brainstorm first, the recipe after a pick ----------------------------------------------------------------

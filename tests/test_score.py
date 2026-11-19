@@ -90,6 +90,16 @@ def test_short_time_in_bed_and_a_late_bedtime_lower_it_gradually():
 
 def test_usual_bedtime_averages_across_midnight():
     assert usual_bedtime([night(23, 30, 3), night(0, 30, 5)]).strftime("%H:%M") == "00:00"
+    # minutes after 18:00, not clock times: 11:30pm and 1:00am are 12:15am (a plain clock average would be noon)
+    assert usual_bedtime([night(23, 30, 3), night(1, 0, 5)]).strftime("%H:%M") == "00:15"
+
+
+def test_lights_out_is_30_min_earlier_on_a_15_min_step():
+    from core.score import lights_out
+    assert lights_out(night(1, 25, 5)).strftime("%H:%M") == "00:45"      # 12:55am -> 12:45am
+    assert lights_out(night(0, 15, 5)).strftime("%H:%M") == "23:45"      # across midnight
+    assert lights_out(night(23, 30, 3)).strftime("%H:%M") == "23:00"     # already on a step
+    assert lights_out(None) is None
 
 
 def test_without_sleep_data_recovery_is_left_out():

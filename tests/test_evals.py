@@ -193,6 +193,7 @@ def test_the_h_code_checks():
     assert checks.medical_line(_turn("4 2 sore legs", "Plan…", categories=["training"]))[0] == "n/a"
     assert checks.not_measured_line(_turn("am I building muscle?", f"Mostly runs.\n\n{NOT_MEASURED}"))[0] == "yes"
     assert checks.not_measured_line(_turn("am I building muscle?", "Mostly runs."))[0] == "no"
+    assert _turn("am I building muscle?", f"Mostly runs.\n\n{NOT_MEASURED}").own_words() == "Mostly runs."   # code's
     facts = {"name": "food_facts", "content": "{}", "artifact": {"verbatim": "A Celsius: 200 mg caffeine.",
                                                                  "call": {"call": "no", "reason": "late"}}}
     assert checks.clear_call(_turn("should I have a Celsius now?", "Not now: it's late.\n\nA Celsius…", [facts]))[0] == "yes"

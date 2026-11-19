@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from core import reply_rules
 
 CODE_LINE = re.compile(r"^(Source \[\d+\]:|Source:|Amounts:|Numbers:|Weight saved:|General guidance, not medical "
-                       r"advice\.$)")
+                       r"advice\.$|Lifts and body composition aren't measured yet)")
 YES = re.compile(r"^\s*(yes|yeah|yep|yup|sure|ok|okay|sounds good|do it|set it up|let'?s do it|go ahead)\b", re.I)
 NUMBER = re.compile(r"\d+(?:\.\d+)?")
 

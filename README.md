@@ -72,13 +72,17 @@ Say you send **"done, what should I eat now?"** at 1:10pm.
    It calls tools: `mark_done` and `suggest_meal`.
 6. **`tools`** (code): `mark_done` fetches Oura again and marks the plan done **with Oura's exact times**,
    or says Oura has no matching workout (it never makes times up). `suggest_meal` sizes one meal from
-   what's left of today's targets, asks the LLM for 1–2 dishes, drops anything suggested in the last
-   5 days, and formats portions in grams and katoris.
+   what's left of today's targets, asks the LLM for 2–3 one-line dishes with rough protein, drops anything
+   suggested in the last 5 days, and ends with "Pick one for the recipe." (portions in grams and katoris come
+   with the recipe, after a pick).
 7. **`respond`** (code): text built by tools is sent exactly as built. The model's own words go through
    the reply rules: at most 3 lines and about 60 words, no internal terms, no "I logged" / "I synced"
    unless that tool really ran this turn, no credit to a source in its own words. A broken draft is
    rewritten once, then trimmed by code. Code adds the source lines (GSSI links, "Numbers: USDA FoodData
-   Central (…)"), and "General guidance, not medical advice." on pain, injury and illness answers.
+   Central (…)"), "General guidance, not medical advice." on every pain, injury and illness answer, and
+   "Lifts and body composition aren't measured yet…" when you ask about muscle or hybrid progress. For
+   "should I have it now?" the answer (yes, no or wait) comes first, and code decides it where a rule applies
+   (caffeine near your usual bedtime or past the day's total, a run later today).
 
 ```
 Marked done: HIIT 12:12–1:03pm (from Oura). How did it feel?
@@ -126,12 +130,14 @@ Plain messages; the only commands are `/start` and `/help`.
 | `correction, it's 9g carbs` / `it was cheese pizza, edit that` | Fixes that entry in place, never a second row. |
 | `remove the pizza` / `delete the last two` | Removes entries; asks which one if it's unclear. |
 | `what did I eat on Oct 10?` / `last Monday` | That day's entries and totals. |
-| `dinner ideas, I have dal, rice and spinach` → `the second one` → `make it higher protein` | Two dishes sized for one meal, then the recipe, then a higher-protein version of the same dish. |
+| `dinner ideas, I have dal, rice and spinach` → `the second one` → `make it higher protein` → `the first one` | 2–3 one-line ideas with rough protein sized for one meal, then the recipe, then higher-protein ideas (the same dish improved first), then that recipe. |
+| `should I have a Celsius right now?` | Yes, no or wait first, with one reason from your day (the time, your usual bedtime, caffeine so far, today's run), then the drink's numbers. |
+| `how hard can I go today?` | One recommendation from code: your program's session if one is planned, else what your readiness allows, and until when; an alternative only on a borderline day. Easy if you said you're unwell. |
 | `how's my day?` | Your score so far vs your own 7-day average, and one kind suggestion ("a 20-min walk would round today out"). |
 | `remember I'm traveling Thu–Sat, keep it light` / `what do you know about me?` / `forget that` | Saved facts, with dates resolved in code. |
 | `update from Oura` | Fetches again and says honestly whether anything new came in. |
 | `how much protein is in a Chobani plain Greek yogurt?` / `200 g chicken, a cup of rice` | Looked up in USDA FoodData Central and summed by code (the same numbers whether you ask or log it); approximate when USDA has no match. |
-| `My long run is Saturday. What should I eat and drink Friday and Saturday?` | A fueling plan computed by code from GSSI's ranges, your weight and your recent runs, a line about your week, and the articles' links. |
+| `My long run is Saturday. What should I eat and drink Friday and Saturday?` | A fueling plan computed by code from GSSI's ranges, your weight and your recent runs, with real foods from your log and when to eat them ("Fri dinner: your usual dal + rice"), a line about your week, and the articles' links. Caffeine is sized for you today ("about 110 mg"), with what you've had and your bedtime. |
 | `I want to run a half marathon on Feb 15 2027` → answers → `yes` | A few questions, two at a time, then the plan before anything is saved; `what's today's session?`, `am I on track?` afterwards. |
 | `my knee hurts when I run` | General guidance, when to see a physio, and an offer to plan around it (saved as a limit the planner enforces). |
 | `what was my protein intake across the past 7 days?` / `which day this week was I lowest?` | Totals, averages and patterns over any range up to 90 days. |
@@ -273,6 +279,7 @@ python scripts/run_evals.py --trials 3 --publish    # every case 3 times: docs/e
 python scripts/run_evals.py --only G-8 --trials 5   # one case or category
 python scripts/run_evals.py --effort agent=low      # reasoning effort for one run
 python scripts/calibrate_judge.py --score           # your marks vs the evals' answers, per check
+python scripts/calibrate_judge.py --rejudge data/evals/<run>   # the judge again on the sheet's replies, reworded checks
 ```
 
 The report gives, per category: routing accuracy, checks passed, trials fully passed, pass^3 (all three

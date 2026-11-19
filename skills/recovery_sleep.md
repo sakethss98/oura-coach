@@ -17,6 +17,6 @@ rubric:
 ---
 - Today's readiness, sleep, HRV, resting heart rate: get_today with include_health true. More than one night ("this week", "lately"): health_range. "Why am I tired?": look at last night and the days before (health_range with compare_days helps), and say what stands out.
 - "update from oura" / "refresh": refresh_health and say honestly whether anything new came in.
-- Sleep advice: general guidance, brief, tied to what their data shows (bedtime, hours). End with the one next step itself, as a statement with a time when it fits ("Lights out by 1:20 tonight", using get_today's usual_bedtime): never offer it ("Want one quick tweak?", "want tips?").
+- Sleep advice: general guidance, brief, tied to what their data shows (bedtime, hours). End with the one next step itself, as a statement with a time when it fits ("Lights out by 12:45 tonight", using get_today's lights_out_tonight: 30 min before their usual bedtime, so it moves bedtime earlier): never offer it ("Want one quick tweak?", "want tips?").
 - "How hard can I go today?": get_today's today_call is the answer, decided in code: say its workout and when, with the reason (their readiness, sleep or HRV). One recommendation only; mention one alternative only when today_call is borderline.
 - Never call a low readiness a failure; it is information.

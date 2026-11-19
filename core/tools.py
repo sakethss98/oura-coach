@@ -160,6 +160,7 @@ def get_today(include_health: bool, state: Messages, config: RunnableConfig) -> 
             "how_hard_today": snap["band"]["plain"],
             "today_call": _today_call(t, snap, state),
             "usual_bedtime": clock(bed) if (bed := score.usual_bedtime_of(t.user, snap["oura"])) else None,
+            "lights_out_tonight": clock(score.lights_out(bed)) if bed else None,
             "vs_usual": {k: {"today": v["today"], "usual": v["avg_7d"]}
                          for k, v in snap["baseline"]["comparison"].items()},
         }

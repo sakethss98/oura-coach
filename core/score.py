@@ -57,6 +57,18 @@ def usual_bedtime(previous: list[datetime]) -> datetime | None:
     return previous[-1].replace(hour=(18 + mean // 60) % 24, minute=mean % 60)
 
 
+LIGHTS_OUT_EARLIER_MIN = 30      # the next-step line moves bedtime earlier, not to the usual time
+LIGHTS_OUT_STEP_MIN = 15         # a clock time people use: on the quarter hour, rounded earlier
+
+
+def lights_out(usual: datetime | None) -> datetime | None:
+    """Lights out tonight: 30 min before their usual bedtime, down to a 15-min step (1:25am -> 12:45am)."""
+    if usual is None:
+        return None
+    earlier = usual - timedelta(minutes=LIGHTS_OUT_EARLIER_MIN)
+    return earlier.replace(minute=earlier.minute - earlier.minute % LIGHTS_OUT_STEP_MIN, second=0, microsecond=0)
+
+
 def usual_bedtime_of(user, bundle: dict) -> datetime | None:
     """Their usual bedtime from the nights before (a Health bundle's history), once there are enough nights."""
     previous = [datetime.fromisoformat(h["bedtime_start"]).astimezone(user.tz) for h in bundle["history"]
